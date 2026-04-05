@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Universal Media Streamer - Play any media from any source" />
+    <meta name="theme-color" content="#6366f1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Universal Media Streamer</title>
+  </head>
+  <body class="bg-dark-900 text-slate-100 font-sans antialiased">
+    <div id="root"></div>
+    <script>
+      // Immediately remove any injected iframe-highlight scripts
+      (function() {
+        var scripts = document.body.querySelectorAll('script');
+        scripts.forEach(function(s) {
+          if (s !== document.currentScript && s.textContent && s.textContent.includes('iframe-highlight')) {
+            s.remove();
+          }
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
