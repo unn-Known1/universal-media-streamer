@@ -11,6 +11,7 @@ import {
   ListPlus,
   Search,
   Monitor,
+  Clipboard,
 } from 'lucide-react';
 import { usePlayer } from '../contexts/PlayerContext';
 import { validateUrl, detectMediaType, getMediaTypeLabel, getMediaTypeColor } from '../utils/mediaDetector';
@@ -150,6 +151,29 @@ export function MediaInput() {
     }
   };
 
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setUrl(text);
+        // Trigger validation
+        const result = validateUrl(text);
+        if (result.valid) {
+          const type = detectMediaType(text);
+          setValidation({
+            valid: true,
+            message: `Detected: ${getMediaTypeLabel(type)}`,
+          });
+        } else {
+          setValidation({ valid: false, message: result.error });
+        }
+        inputRef.current?.focus();
+      }
+    } catch (error) {
+      showToast('Unable to paste from clipboard', 'error');
+    }
+  };
+
   const mediaType = url.trim() ? detectMediaType(url) : null;
 
   return (
@@ -175,29 +199,40 @@ export function MediaInput() {
             value={url}
             onChange={handleUrlChange}
             placeholder="Paste video URL, HLS/DASH stream, YouTube, Vimeo, or any webpage..."
-            className={`w-full h-14 pl-12 pr-36 rounded-2xl bg-dark-700/50 border-2 transition-all outline-none ${
+            className={`w-full h-14 pl-12 pr-48 rounded-2xl bg-dark-700/50 border-2 transition-all outline-none ${
               validation.valid
                 ? 'border-white/10 focus:border-primary-500/50 focus:ring-4 focus:ring-primary-500/10'
                 : 'border-red-500/50 focus:border-red-500'
             }`}
           />
-          {url.trim() && (
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              {validation.valid && mediaType ? (
-                <span
-                  className="px-2 py-1 text-xs font-medium rounded-lg"
-                  style={{
-                    backgroundColor: `${getMediaTypeColor(mediaType)}20`,
-                    color: getMediaTypeColor(mediaType),
-                  }}
-                >
-                  {getMediaTypeLabel(mediaType)}
-                </span>
-              ) : !validation.valid ? (
-                <AlertCircle className="w-5 h-5 text-red-400" />
-              ) : null}
-            </div>
-          )}
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            {/* Paste Button */}
+            <button
+              type="button"
+              onClick={handlePaste}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors text-slate-400 hover:text-white"
+              title="Paste from clipboard"
+            >
+              <Clipboard className="w-5 h-5" />
+            </button>
+            {url.trim() && (
+              <>
+                {validation.valid && mediaType ? (
+                  <span
+                    className="px-2 py-1 text-xs font-medium rounded-lg"
+                    style={{
+                      backgroundColor: `${getMediaTypeColor(mediaType)}20`,
+                      color: getMediaTypeColor(mediaType),
+                    }}
+                  >
+                    {getMediaTypeLabel(mediaType)}
+                  </span>
+                ) : !validation.valid ? (
+                  <AlertCircle className="w-5 h-5 text-red-400" />
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Validation Message */}
