@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Play, Loader2, AlertCircle, Volume2, VolumeX } from 'lucide-react';
+import { Play, Loader2, AlertCircle, Volume2, VolumeX, Tv, ChevronLeft, ChevronRight, List } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Hls from 'hls.js';
 import dash from 'dashjs';
 import { usePlayer } from '../contexts/PlayerContext';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { ControlBar } from './ControlBar';
+import { IPTVChannelNavigator } from './IPTVChannelList';
 import { detectMediaType, extractYoutubeId, extractVimeoId, getEmbedUrl } from '../utils/mediaDetector';
 import { CONTROL_BAR_HIDE_DELAY } from '../utils/constants';
+import { IPTVChannel } from '../types';
 
 interface PlayerProps {
   onShowShortcuts: () => void;
@@ -26,6 +28,9 @@ export function Player({ onShowShortcuts }: PlayerProps) {
     toggleFullscreen,
     togglePiP,
     showToast,
+    playNextChannel,
+    playPreviousChannel,
+    currentPlaylist,
   } = usePlayer();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,8 +43,16 @@ export function Player({ onShowShortcuts }: PlayerProps) {
   const [error, setError] = useState<string | null>(null);
   const [showBigPlay, setShowBigPlay] = useState(true);
   const [volumeLevel, setVolumeLevel] = useState(1);
+  const [showChannelList, setShowChannelList] = useState(false);
 
-  const { currentMedia, url: _url } = { currentMedia: playerState.currentMedia, url: playerState.currentMedia?.url || '' };
+  const { currentMedia, url: _url } = { 
+    currentMedia: playerState.currentMedia, 
+    url: playerState.currentMedia?.url || '' 
+  };
+
+  // Check if current media is IPTV
+  const isIPTV = playerState.isIPTV && (playerState.currentMedia as IPTVChannel)?.type === 'iptv';
+  const currentIPTVChannel = isIPTV ? currentMedia as IPTVChannel : null;
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -113,6 +126,7 @@ export function Player({ onShowShortcuts }: PlayerProps) {
 
     switch (mediaType) {
       case 'hls':
+      case 'iptv': // IPTV streams are usually HLS
         if (Hls.isSupported()) {
           const hls = new Hls({
             enableWorker: true,
@@ -126,7 +140,7 @@ export function Player({ onShowShortcuts }: PlayerProps) {
           });
           hls.on(Hls.Events.ERROR, (_, data) => {
             if (data.fatal) {
-              setError('Failed to load HLS stream');
+              setError('Failed to load stream');
               setIsLoading(false);
             }
           });
@@ -177,7 +191,7 @@ export function Player({ onShowShortcuts }: PlayerProps) {
         dashPlayerRef.current.destroy();
       }
     };
-  }, [currentMedia]);
+  }, [currentMedia, videoRef]);
 
   // Video event handlers
   useEffect(() => {
@@ -185,7 +199,12 @@ export function Player({ onShowShortcuts }: PlayerProps) {
     if (!video) return;
 
     const handleTimeUpdate = () => {
-      // Update current time in context would be done here
+      // Handle A-B repeat for IPTV
+      if (playerState.abRepeat.start !== null && playerState.abRepeat.end !== null) {
+        if (video.currentTime >= playerState.abRepeat.end) {
+          video.currentTime = playerState.abRepeat.start;
+        }
+      }
     };
 
     const handleLoadedMetadata = () => {
@@ -195,7 +214,10 @@ export function Player({ onShowShortcuts }: PlayerProps) {
 
     const handleEnded = () => {
       if (!playerState.isLooping) {
-        // Handle video ended
+        // For IPTV, try to play next channel
+        if (isIPTV) {
+          playNextChannel();
+        }
       }
     };
 
@@ -222,7 +244,7 @@ export function Player({ onShowShortcuts }: PlayerProps) {
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [videoRef, playerState.isLooping]);
+  }, [videoRef, playerState.isLooping, playerState.abRepeat, isIPTV, playNextChannel]);
 
   // Sync video state with context
   useEffect(() => {
@@ -304,6 +326,7 @@ export function Player({ onShowShortcuts }: PlayerProps) {
             <Play className="w-12 h-12 text-primary-400" />
           </div>
           <p className="text-lg text-slate-400">Paste a URL to start playing</p>
+          <p className="text-sm text-slate-500 mt-2">or load an IPTV M3U/M3U8 playlist</p>
         </div>
       )}
 
@@ -365,6 +388,33 @@ export function Player({ onShowShortcuts }: PlayerProps) {
         )}
       </AnimatePresence>
 
+      {/* IPTV Channel Navigator (shown when playing IPTV) */}
+      {isIPTV && currentIPTVChannel && currentPlaylist && (
+        <div className="absolute top-4 left-4 right-4 z-30">
+          <IPTVChannelNavigator
+            playlist={currentPlaylist}
+            currentChannel={currentIPTVChannel}
+            onPrevious={playPreviousChannel}
+            onNext={playNextChannel}
+            onOpenList={() => setShowChannelList(true)}
+          />
+        </div>
+      )}
+
+      {/* Channel List Toggle Button (IPTV) */}
+      {isIPTV && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowChannelList(!showChannelList);
+          }}
+          className="absolute bottom-20 left-4 z-30 p-3 rounded-xl bg-violet-500/80 hover:bg-violet-500 transition-colors shadow-lg"
+          title="Open Channel List"
+        >
+          <List className="w-5 h-5" />
+        </button>
+      )}
+
       {/* Control Bar */}
       <AnimatePresence>
         {showControls && currentMedia && (
@@ -401,6 +451,14 @@ export function Player({ onShowShortcuts }: PlayerProps) {
       {playerState.quality !== 'auto' && (
         <div className="absolute top-4 right-4 px-2 py-1 bg-dark-700/90 backdrop-blur rounded text-xs font-medium">
           {playerState.quality}
+        </div>
+      )}
+
+      {/* IPTV Badge */}
+      {isIPTV && (
+        <div className="absolute top-4 right-4 px-2 py-1 bg-violet-500/90 backdrop-blur rounded text-xs font-medium flex items-center gap-1">
+          <Tv className="w-3 h-3" />
+          IPTV
         </div>
       )}
 
