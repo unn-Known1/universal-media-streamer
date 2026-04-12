@@ -1,4 +1,4 @@
-export type MediaType = 'mp4' | 'webm' | 'hls' | 'dash' | 'youtube' | 'vimeo' | 'google-drive' | 'dropbox' | 'unknown';
+export type MediaType = 'mp4' | 'webm' | 'hls' | 'dash' | 'youtube' | 'vimeo' | 'google-drive' | 'dropbox' | 'iptv' | 'unknown';
 
 export interface MediaItem {
   id: string;
@@ -17,8 +17,33 @@ export interface PlaylistItem extends MediaItem {
   position: number;
 }
 
+// IPTV Types
+export interface IPTVChannel {
+  id: string;
+  name: string;
+  logo?: string;
+  group?: string;
+  tvgId?: string;
+  tvgName?: string;
+  tvgLogo?: string;
+  url: string;
+  type: 'iptv';
+  category?: string;
+  addedAt: number;
+  lastPlayedAt?: number;
+}
+
+export interface IPTVPlaylist {
+  id: string;
+  name: string;
+  url: string;
+  channels: IPTVChannel[];
+  addedAt: number;
+  lastUsedAt?: number;
+}
+
 export interface PlayerState {
-  currentMedia: MediaItem | null;
+  currentMedia: MediaItem | IPTVChannel | null;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -35,6 +60,10 @@ export interface PlayerState {
   buffered: number;
   isLooping: boolean;
   abRepeat: { start: number | null; end: number | null };
+  // IPTV specific
+  currentPlaylist?: IPTVPlaylist;
+  currentChannelIndex: number;
+  isIPTV: boolean;
 }
 
 export interface SubtitleTrack {
@@ -56,6 +85,9 @@ export interface Settings {
   captionBackground: string;
   reducedMotion: boolean;
   highContrast: boolean;
+  // IPTV specific
+  iptvLastPlaylist?: string;
+  iptvRememberChannel: boolean;
 }
 
 export interface Toast {
