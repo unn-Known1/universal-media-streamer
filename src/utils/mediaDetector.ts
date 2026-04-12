@@ -6,6 +6,7 @@ import {
   GOOGLE_DRIVE_PATTERN,
   DROPBOX_PATTERN,
 } from './constants';
+import { isIPTVPlaylistUrl } from './iptvParser';
 
 export function detectMediaType(url: string): MediaType {
   // Check for YouTube
@@ -28,6 +29,11 @@ export function detectMediaType(url: string): MediaType {
   // Check for Dropbox
   if (DROPBOX_PATTERN.test(url)) {
     return 'dropbox';
+  }
+
+  // Check for IPTV playlist before file extensions
+  if (isIPTVPlaylistUrl(url)) {
+    return 'iptv';
   }
 
   // Check file extensions
@@ -66,6 +72,7 @@ export function getMediaTypeLabel(type: MediaType): string {
     vimeo: 'Vimeo',
     'google-drive': 'Google Drive',
     dropbox: 'Dropbox',
+    iptv: 'IPTV',
     unknown: 'Unknown',
   };
   return labels[type];
@@ -81,6 +88,7 @@ export function getMediaTypeColor(type: MediaType): string {
     vimeo: '#06b6d4',
     'google-drive': '#3b82f6',
     dropbox: '#0061fe',
+    iptv: '#8b5cf6',
     unknown: '#94a3b8',
   };
   return colors[type];
@@ -138,6 +146,11 @@ export function getEmbedUrl(url: string): string {
       return convertGoogleDriveUrl(url);
     case 'dropbox':
       return convertDropboxUrl(url);
+    case 'iptv':
+    case 'hls':
+    case 'dash':
+    case 'mp4':
+    case 'webm':
     default:
       return url;
   }
