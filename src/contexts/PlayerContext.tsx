@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode } from 'react';
-import { PlayerState, MediaItem, SubtitleTrack, Toast } from '../types';
+import { PlayerState, MediaItem, SubtitleTrack, Toast, IPTVChannel, IPTVPlaylist } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { detectMediaType } from '../utils/mediaDetector';
 import { MAX_HISTORY_ITEMS, MAX_BOOKMARK_ITEMS } from '../utils/constants';
@@ -11,7 +11,12 @@ interface PlayerContextType {
   history: MediaItem[];
   bookmarks: MediaItem[];
   toasts: Toast[];
+  // IPTV specific
+  iptvPlaylists: IPTVPlaylist[];
+  currentPlaylist: IPTVPlaylist | null;
+  // Methods
   loadMedia: (url: string, title?: string) => void;
+  loadIPTVChannel: (channel: IPTVChannel, playlist?: IPTVPlaylist, index?: number) => void;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
@@ -32,11 +37,19 @@ interface PlayerContextType {
   removeFromPlaylist: (id: string) => void;
   clearPlaylist: () => void;
   playNext: () => void;
+  playPrevious: () => void;
   addToHistory: (item: MediaItem) => void;
   clearHistory: () => void;
   addBookmark: (item: MediaItem) => void;
   removeBookmark: (id: string) => void;
   clearBookmarks: () => void;
+  // IPTV methods
+  addIPTVPlaylist: (playlist: IPTVPlaylist) => void;
+  removeIPTVPlaylist: (id: string) => void;
+  clearIPTVPlaylists: () => void;
+  playNextChannel: () => void;
+  playPreviousChannel: () => void;
+  // Toast methods
   showToast: (message: string, type?: Toast['type'], duration?: number) => void;
   dismissToast: (id: string) => void;
 }
@@ -61,6 +74,9 @@ const initialPlayerState: PlayerState = {
   buffered: 0,
   isLooping: false,
   abRepeat: { start: null, end: null },
+  currentPlaylist: undefined,
+  currentChannelIndex: 0,
+  isIPTV: false,
 };
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
@@ -69,6 +85,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playlist, setPlaylist] = useLocalStorage<MediaItem[]>('ums-playlist', []);
   const [history, setHistory] = useLocalStorage<MediaItem[]>('ums-history', []);
   const [bookmarks, setBookmarks] = useLocalStorage<MediaItem[]>('ums-bookmarks', []);
+  const [iptvPlaylists, setIptvPlaylists] = useLocalStorage<IPTVPlaylist[]>('ums-iptv-playlists', []);
+  const [currentPlaylist, setCurrentPlaylist] = useState<IPTVPlaylist | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -90,10 +108,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying: true,
       currentTime: 0,
       duration: 0,
+      isIPTV: false,
+      currentPlaylist: undefined,
+      currentChannelIndex: 0,
     }));
 
     // Add to history
     addToHistory(newMedia);
+  }, []);
+
+  // IPTV specific: Load a channel
+  const loadIPTVChannel = useCallback((channel: IPTVChannel, playlist?: IPTVPlaylist, index?: number) => {
+    setCurrentPlaylist(playlist || null);
+    
+    setPlayerState((prev) => ({
+      ...prev,
+      currentMedia: {
+        ...channel,
+        lastPlayedAt: Date.now(),
+      } as IPTVChannel,
+      isPlaying: true,
+      currentTime: 0,
+      duration: 0,
+      isIPTV: true,
+      currentPlaylist: playlist,
+      currentChannelIndex: index ?? 0,
+    }));
   }, []);
 
   const play = useCallback(() => {
@@ -230,6 +270,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [playlist, playerState.currentMedia, loadMedia]);
 
+  const playPrevious = useCallback(() => {
+    if (playlist.length > 0 && playerState.currentMedia) {
+      const currentIndex = playlist.findIndex((item) => item.id === playerState.currentMedia?.id);
+      if (currentIndex > 0) {
+        const prevItem = playlist[currentIndex - 1];
+        loadMedia(prevItem.url, prevItem.title);
+      }
+    }
+  }, [playlist, playerState.currentMedia, loadMedia]);
+
+  // IPTV: Play next channel in playlist
+  const playNextChannel = useCallback(() => {
+    if (playerState.isIPTV && currentPlaylist && playerState.currentChannelIndex < currentPlaylist.channels.length - 1) {
+      const nextIndex = playerState.currentChannelIndex + 1;
+      const nextChannel = currentPlaylist.channels[nextIndex];
+      loadIPTVChannel(nextChannel, currentPlaylist, nextIndex);
+    }
+  }, [playerState.isIPTV, currentPlaylist, playerState.currentChannelIndex, loadIPTVChannel]);
+
+  // IPTV: Play previous channel in playlist
+  const playPreviousChannel = useCallback(() => {
+    if (playerState.isIPTV && currentPlaylist && playerState.currentChannelIndex > 0) {
+      const prevIndex = playerState.currentChannelIndex - 1;
+      const prevChannel = currentPlaylist.channels[prevIndex];
+      loadIPTVChannel(prevChannel, currentPlaylist, prevIndex);
+    }
+  }, [playerState.isIPTV, currentPlaylist, playerState.currentChannelIndex, loadIPTVChannel]);
+
   const addToHistory = useCallback((item: MediaItem) => {
     setHistory((prev) => {
       // Remove if already exists
@@ -264,6 +332,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setBookmarks([]);
   }, [setBookmarks]);
 
+  // IPTV Playlist management
+  const addIPTVPlaylist = useCallback((playlist: IPTVPlaylist) => {
+    setIptvPlaylists((prev) => {
+      // Update if exists, otherwise add
+      const filtered = prev.filter((p) => p.url !== playlist.url);
+      return [playlist, ...filtered].slice(0, 20); // Keep max 20 playlists
+    });
+  }, [setIptvPlaylists]);
+
+  const removeIPTVPlaylist = useCallback((id: string) => {
+    setIptvPlaylists((prev) => prev.filter((p) => p.id !== id));
+  }, [setIptvPlaylists]);
+
+  const clearIPTVPlaylists = useCallback(() => {
+    setIptvPlaylists([]);
+  }, [setIptvPlaylists]);
+
   const showToast = useCallback((message: string, type: Toast['type'] = 'info', duration: number = 3000) => {
     const id = generateId();
     setToasts((prev) => [...prev, { id, message, type, duration }]);
@@ -286,7 +371,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     history,
     bookmarks,
     toasts,
+    iptvPlaylists,
+    currentPlaylist,
     loadMedia,
+    loadIPTVChannel,
     play,
     pause,
     togglePlay,
@@ -307,19 +395,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     removeFromPlaylist,
     clearPlaylist,
     playNext,
+    playPrevious,
     addToHistory,
     clearHistory,
     addBookmark,
     removeBookmark,
     clearBookmarks,
+    addIPTVPlaylist,
+    removeIPTVPlaylist,
+    clearIPTVPlaylists,
+    playNextChannel,
+    playPreviousChannel,
     showToast,
     dismissToast,
   }), [
-    playerState, playlist, history, bookmarks, toasts, loadMedia, play, pause, togglePlay,
+    playerState, playlist, history, bookmarks, toasts, iptvPlaylists, currentPlaylist,
+    loadMedia, loadIPTVChannel, play, pause, togglePlay,
     seek, seekRelative, setVolume, toggleMute, setPlaybackRate, toggleFullscreen,
     toggleTheaterMode, togglePiP, setQuality, setSubtitle, toggleLoop, setABRepeat,
-    clearABRepeat, addToPlaylist, removeFromPlaylist, clearPlaylist, playNext,
+    clearABRepeat, addToPlaylist, removeFromPlaylist, clearPlaylist, playNext, playPrevious,
     addToHistory, clearHistory, addBookmark, removeBookmark, clearBookmarks,
+    addIPTVPlaylist, removeIPTVPlaylist, clearIPTVPlaylists, playNextChannel, playPreviousChannel,
     showToast, dismissToast
   ]);
 
