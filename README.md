@@ -14,12 +14,12 @@ A powerful, feature-rich web-based media player that supports streaming from any
 
 ## Live Demo
 
-**Test the app:** [https://58qcaop88nfj.space.minimax.io](https://58qcaop88nfj.space.minimax.io)
+**Test the app:** [https://2yiw37rebufv.space.minimax.io](https://2yiw37rebufv.space.minimax.io)
 
 ## Supported Sources
 
 | Source Type | Extensions/Platforms | Support |
-|-------------|---------------------|---------|
+|-------------|---------------------|--------|
 | **Direct Video** | MP4, WebM, MKV, AVI, MOV, WMV, FLV, WEBM | ✅ Full |
 | **HLS Streaming** | .m3u8 | ✅ Full |
 | **DASH Streaming** | .mpd | ✅ Full |
