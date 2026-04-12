@@ -12,19 +12,36 @@ import {
   Search,
   Monitor,
   Clipboard,
+  Tv,
+  List,
+  X,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayer } from '../contexts/PlayerContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { validateUrl, detectMediaType, getMediaTypeLabel, getMediaTypeColor } from '../utils/mediaDetector';
 import { PlayableSourcesModal } from './PlayableSourcesModal';
+import { IPTVChannelList, IPTVChannelListLoading } from './IPTVChannelList';
+import { loadIPTVPlaylist } from '../utils/iptvParser';
+import { IPTVChannel, IPTVPlaylist } from '../types';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export function MediaInput() {
-  const { loadMedia, addBookmark, addToPlaylist, showToast } = usePlayer();
+  const { loadMedia, loadIPTVChannel, addBookmark, addToPlaylist, showToast } = usePlayer();
+  const { settings, updateSettings } = useSettings();
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [validation, setValidation] = useState<{ valid: boolean; message?: string }>({ valid: true });
   const [isDragging, setIsDragging] = useState(false);
   const [showSourcesModal, setShowSourcesModal] = useState(false);
+  
+  // IPTV specific state
+  const [showIPTVList, setShowIPTVList] = useState(false);
+  const [currentPlaylist, setCurrentPlaylist] = useState<IPTVPlaylist | null>(null);
+  const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
+  const [savedPlaylists, setSavedPlaylists] = useLocalStorage<IPTVPlaylist[]>('ums-iptv-playlists', []);
+  
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,8 +79,13 @@ export function MediaInput() {
       return;
     }
 
-    // Check if URL is a direct playable source
+    // Check if URL is IPTV playlist
     const mediaType = detectMediaType(url);
+    
+    if (mediaType === 'iptv') {
+      await loadIPTVPlaylistFromUrl(url);
+      return;
+    }
 
     // If it's not a direct playable source, show the sources modal
     if (mediaType === 'unknown' || (!url.includes('.mp4') && !url.includes('.webm') && !url.includes('.m3u8') && !url.includes('.mpd') && !url.includes('youtube') && !url.includes('youtu.be') && !url.includes('vimeo'))) {
@@ -81,6 +103,36 @@ export function MediaInput() {
       setValidation({ valid: true });
     } catch (error) {
       showToast('Failed to load media', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadIPTVPlaylistFromUrl = async (playlistUrl: string) => {
+    setIsLoading(true);
+    try {
+      const playlist = await loadIPTVPlaylist(playlistUrl);
+      setCurrentPlaylist(playlist);
+      
+      // Save to recent playlists
+      setSavedPlaylists((prev) => {
+        const filtered = prev.filter(p => p.url !== playlistUrl);
+        return [playlist, ...filtered].slice(0, 10);
+      });
+      
+      // Update settings
+      updateSettings({ iptvLastPlaylist: playlistUrl });
+      
+      // Show channel list
+      setShowIPTVList(true);
+      
+      if (playlist.channels.length > 0) {
+        showToast(`Loaded ${playlist.channels.length} channels from ${playlist.name}`, 'success');
+      } else {
+        showToast('No channels found in playlist', 'warning');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to load IPTV playlist', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -174,10 +226,80 @@ export function MediaInput() {
     }
   };
 
+  // IPTV Channel handlers
+  const handleSelectIPTVChannel = (channel: IPTVChannel) => {
+    if (currentPlaylist) {
+      const index = currentPlaylist.channels.findIndex(ch => ch.id === channel.id);
+      loadIPTVChannel(channel, currentPlaylist, index);
+    }
+  };
+
+  const handlePlayIPTVChannel = (channel: IPTVChannel) => {
+    if (currentPlaylist) {
+      const index = currentPlaylist.channels.findIndex(ch => ch.id === channel.id);
+      loadIPTVChannel(channel, currentPlaylist, index);
+      setShowIPTVList(false);
+    }
+  };
+
+  const handlePreviousIPTVChannel = () => {
+    if (currentPlaylist && currentPlaylist.channels.length > 0) {
+      const currentIndex = currentPlaylist.channels.findIndex(ch => ch.id === currentPlaylist.channels[0]?.id);
+      if (currentIndex > 0) {
+        const prevChannel = currentPlaylist.channels[currentIndex - 1];
+        loadIPTVChannel(prevChannel, currentPlaylist, currentIndex - 1);
+      }
+    }
+  };
+
+  const handleNextIPTVChannel = () => {
+    if (currentPlaylist && currentPlaylist.channels.length > 0) {
+      const currentIndex = currentPlaylist.channels.findIndex(ch => ch.id === currentPlaylist.channels[0]?.id);
+      if (currentIndex < currentPlaylist.channels.length - 1) {
+        const nextChannel = currentPlaylist.channels[currentIndex + 1];
+        loadIPTVChannel(nextChannel, currentPlaylist, currentIndex + 1);
+      }
+    }
+  };
+
+  // Load saved playlist
+  const handleLoadSavedPlaylist = async (playlist: IPTVPlaylist) => {
+    setIsLoading(true);
+    try {
+      const refreshed = await loadIPTVPlaylist(playlist.url);
+      setCurrentPlaylist(refreshed);
+      setShowIPTVList(true);
+      showToast(`Loaded ${refreshed.channels.length} channels`, 'success');
+    } catch (error) {
+      showToast('Failed to load playlist', 'error');
+      // Remove invalid playlist
+      setSavedPlaylists((prev) => prev.filter(p => p.id !== playlist.id));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const mediaType = url.trim() ? detectMediaType(url) : null;
+  const isIPTV = mediaType === 'iptv';
 
   return (
     <div className="w-full max-w-2xl mx-auto">
+      {/* IPTV Channel List Modal */}
+      {currentPlaylist && (
+        <IPTVChannelList
+          playlist={currentPlaylist}
+          isOpen={showIPTVList}
+          onClose={() => setShowIPTVList(false)}
+          onSelectChannel={handleSelectIPTVChannel}
+          onPlayChannel={handlePlayIPTVChannel}
+        />
+      )}
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <IPTVChannelListLoading />
+      )}
+
       {/* Sources Modal */}
       <PlayableSourcesModal
         isOpen={showSourcesModal}
@@ -198,7 +320,7 @@ export function MediaInput() {
             type="text"
             value={url}
             onChange={handleUrlChange}
-            placeholder="Paste video URL, HLS/DASH stream, YouTube, Vimeo, or any webpage..."
+            placeholder="Paste video URL, HLS/DASH stream, YouTube, Vimeo, or M3U/M3U8 IPTV playlist..."
             className={`w-full h-14 pl-12 pr-48 rounded-2xl bg-dark-700/50 border-2 transition-all outline-none ${
               validation.valid
                 ? 'border-white/10 focus:border-primary-500/50 focus:ring-4 focus:ring-primary-500/10'
@@ -277,9 +399,21 @@ export function MediaInput() {
             ) : (
               <>
                 <Play className="w-5 h-5 fill-white" />
-                Play Media
+                {isIPTV ? 'Load IPTV' : 'Play Media'}
               </>
             )}
+          </button>
+
+          {/* IPTV Button */}
+          <button
+            type="button"
+            onClick={handleScanForSources}
+            disabled={!url.trim()}
+            className="h-12 px-4 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-violet-500/25"
+            title={isIPTV ? 'Open IPTV Channels' : 'Scan for playable sources'}
+          >
+            <Tv className="w-5 h-5" />
+            {isIPTV && <List className="w-4 h-4" />}
           </button>
 
           {/* Scan for Sources Button */}
@@ -291,7 +425,6 @@ export function MediaInput() {
             title="Scan for playable sources"
           >
             <Search className="w-5 h-5" />
-            <span className="hidden sm:inline">Scan</span>
           </button>
 
           {/* Cast Button */}
@@ -366,6 +499,28 @@ export function MediaInput() {
         className="hidden"
       />
 
+      {/* Saved IPTV Playlists */}
+      {savedPlaylists.length > 0 && (
+        <div className="mt-6">
+          <p className="text-sm text-slate-500 mb-3 flex items-center gap-2">
+            <Tv className="w-4 h-4" />
+            Recent IPTV Playlists
+          </p>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {savedPlaylists.slice(0, 5).map((playlist) => (
+              <button
+                key={playlist.id}
+                onClick={() => handleLoadSavedPlaylist(playlist)}
+                className="flex-shrink-0 px-4 py-2 rounded-xl bg-dark-700/50 hover:bg-white/10 border border-white/5 hover:border-violet-500/30 transition-colors text-sm"
+              >
+                <span className="font-medium">{playlist.name}</span>
+                <span className="text-xs text-slate-500 ml-2">{playlist.channels.length} ch</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Drag & Drop Zone */}
       <div
         onDragOver={handleDragOver}
@@ -388,7 +543,7 @@ export function MediaInput() {
               {isDragging ? 'Drop your file here' : 'Drag & drop a file or URL'}
             </p>
             <p className="text-sm text-slate-500 mt-1">
-              Supports MP4, WebM, MKV, HLS, DASH, YouTube, Vimeo, and more
+              Supports MP4, WebM, MKV, HLS, DASH, YouTube, Vimeo, and IPTV M3U/M3U8 playlists
             </p>
           </div>
         </div>
@@ -406,7 +561,7 @@ export function MediaInput() {
             'Vimeo',
             'Google Drive',
             'Dropbox',
-            'Any webpage URL',
+            'IPTV M3U/M3U8',
           ].map((source) => (
             <button
               key={source}
@@ -422,15 +577,31 @@ export function MediaInput() {
         </div>
       </div>
 
-      {/* Info Banner */}
-      <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
-        <div className="flex items-start gap-3">
-          <Search className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium text-amber-300">Smart URL Detection</p>
-            <p className="text-sm text-slate-400 mt-1">
-              Paste any webpage URL and click <span className="text-amber-400 font-medium">Scan</span> to automatically find all playable video/audio sources embedded in that page, including HLS streams, DASH manifests, and direct video files.
-            </p>
+      {/* Info Banners */}
+      <div className="mt-6 space-y-3">
+        {/* IPTV Banner */}
+        <div className="p-4 rounded-xl bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/20">
+          <div className="flex items-start gap-3">
+            <Tv className="w-5 h-5 text-violet-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-violet-300">IPTV Support</p>
+              <p className="text-sm text-slate-400 mt-1">
+                Paste an M3U or M3U8 playlist URL to load all TV channels. Supports group titles, channel logos, and EPG data.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* URL Detection Banner */}
+        <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+          <div className="flex items-start gap-3">
+            <Search className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-amber-300">Smart URL Detection</p>
+              <p className="text-sm text-slate-400 mt-1">
+                Paste any webpage URL and click <span className="text-amber-400 font-medium">Scan</span> to automatically find all playable video/audio sources embedded in that page, including HLS streams, DASH manifests, and direct video files.
+              </p>
+            </div>
           </div>
         </div>
       </div>
