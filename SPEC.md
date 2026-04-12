@@ -3,8 +3,8 @@
 ## Project Overview
 - **Project Name**: Universal Media Streamer
 - **Type**: Web-based streaming platform / PWA
-- **Core Functionality**: A versatile media player that accepts any media link (direct URLs, HLS, DASH, YouTube, etc.) and plays them seamlessly with a modern, feature-rich interface
-- **Target Users**: Content creators, streamers, educators, and anyone who needs to play various media formats from different sources
+- **Core Functionality**: A versatile media player that accepts any media link (direct URLs, HLS, DASH, YouTube, IPTV, etc.) and plays them seamlessly with a modern, feature-rich interface
+- **Target Users**: Content creators, streamers, educators, IPTV users, and anyone who needs to play various media formats from different sources
 
 ## Technology Stack
 - **Frontend Framework**: React 18 + TypeScript + Vite
@@ -21,6 +21,7 @@
 - **Primary Background**: #0a0a0f (deep space black)
 - **Secondary Background**: #141420 (card backgrounds)
 - **Accent Color**: #6366f1 (indigo) - customizable
+- **IPTV Accent**: #8b5cf6 (violet) - for IPTV-specific elements
 - **Success**: #22c55e
 - **Warning**: #f59e0b
 - **Error**: #ef4444
@@ -43,7 +44,7 @@
 
 ### 1. Media Input System
 - Universal URL paste with auto-detection of format
-- Supported formats: MP4, WebM, MKV, HLS (.m3u8), DASH (.mpd), YouTube, Vimeo, Google Drive, Dropbox
+- Supported formats: MP4, WebM, MKV, HLS (.m3u8), DASH (.mpd), YouTube, Vimeo, Google Drive, Dropbox, IPTV M3U/M3U8
 - URL validation with visual feedback
 - Recent URLs history (localStorage, max 20 items)
 - Bookmarks/favorites with custom names
@@ -51,14 +52,24 @@
 - **Smart URL Detection**: Paste any webpage URL and click "Scan" to automatically find all playable video/audio sources embedded in that page
 - **Direct Cast Option**: Cast media directly to Chromecast, AirPlay, or DLNA devices
 
-### 2. Video Player Core
+### 2. IPTV Support (NEW)
+- **M3U/M3U8 Playlist Loading**: Paste any IPTV playlist URL to load all channels
+- **Channel Categorization**: Automatic grouping by category/group-title
+- **Channel Logos**: Display logos when available in playlist metadata
+- **Quick Navigation**: Previous/Next channel buttons in control bar
+- **Channel List Modal**: Grid/List view of all channels with search
+- **Playlist Persistence**: Recently used playlists saved in localStorage
+- **Live Stream Support**: HLS-based live TV streaming with LIVE indicator
+- **Channel Info Display**: Show current channel name in player overlay
+
+### 3. Video Player Core
 - Video.js-based player with custom skin
-- HLS.js for .m3u8 streams
+- HLS.js for .m3u8 streams (including IPTV)
 - DASH.js for .mpd streams
 - YouTube embed support via YouTube IFrame API
 - Adaptive bitrate streaming
 
-### 3. Player Controls
+### 4. Player Controls
 | Feature | Implementation |
 |---------|----------------|
 | Play/Pause | Click, Spacebar, K key |
@@ -76,20 +87,23 @@
 | Screenshot | Capture frame to PNG |
 | Volume Boost | Up to 200% |
 | Chapter Markers | Visual markers on timeline |
+| **IPTV Navigation** | Previous/Next channel buttons |
+| **IPTV Channel List** | Modal with grid/list view |
 
-### 4. Casting & Sharing
+### 5. Casting & Sharing
 - Chromecast support (castbutton)
 - DLNA/UPnP local network casting
 - WebRTC-based local streaming
 - Share URL functionality
 
-### 5. Sidebar Features
+### 6. Sidebar Features
 - Playlist/queue management
 - Recent URLs list
 - Bookmarks management
+- IPTV playlists management
 - Search/filter
 
-### 6. Settings Panel
+### 7. Settings Panel
 - Theme: Dark/Light/System
 - Player accent color picker
 - Default playback speed
@@ -97,8 +111,9 @@
 - Keyboard shortcuts reference
 - Auto-play next
 - Layout density
+- IPTV settings (remember last channel, etc.)
 
-### 7. Accessibility
+### 8. Accessibility
 - Full keyboard navigation
 - ARIA labels on all controls
 - Focus indicators
@@ -106,7 +121,7 @@
 - High contrast mode option
 - Reduced motion option
 
-### 8. PWA Features
+### 9. PWA Features
 - Installable app
 - Offline local file playback
 - Background downloads
@@ -123,9 +138,10 @@
 
 ### Sidebar
 - Toggle button (hamburger icon)
-- Tabs: Playlist, History, Bookmarks
+- Tabs: Playlist, History, Bookmarks, IPTV
 - Each item: thumbnail placeholder, title, duration, source badge
 - Right-click context menu: Play, Add to playlist, Bookmark, Copy URL, Delete
+- IPTV tab shows saved playlists with channel count
 
 ### Main Player
 - Video display area (16:9)
@@ -137,15 +153,28 @@
 - Time display
 - Quality badge
 - Subtitle display area
+- **IPTV Channel Navigator** (when playing IPTV)
+- **LIVE badge** (for live streams)
+- **IPTV badge** (channel indicator)
+
+### IPTV Channel List Modal
+- Header with playlist name and channel count
+- Search input for filtering
+- Category filter dropdown
+- Grid/List view toggle
+- Sort options (A-Z, By Group)
+- Expandable category sections
+- Channel cards with logo, name, and play button
+- Channel list items with channel info
 
 ### Control Bar Elements
 - Play/Pause
-- Skip back 10s
-- Skip forward 10s
+- Skip back 10s (disabled for live IPTV)
+- Skip forward 10s (disabled for live IPTV)
 - Volume + mute
 - Current time / Duration
 - Progress bar
-- Speed selector
+- Speed selector (disabled for live IPTV)
 - Quality selector
 - Subtitle toggle
 - PiP toggle
@@ -156,6 +185,8 @@
 - Settings
 - Loop toggle
 - A-B repeat
+- **Previous Channel** (IPTV only)
+- **Next Channel** (IPTV only)
 
 ### Settings Modal
 - Tabbed interface
@@ -220,6 +251,10 @@
 11. ✓ PWA installable
 12. ✓ All keyboard shortcuts work
 13. ✓ Theme toggle works (dark/light)
+14. ✓ **IPTV M3U/M3U8 playlists load correctly**
+15. ✓ **IPTV channels display with names and logos**
+16. ✓ **IPTV channel switching works**
+17. ✓ **IPTV playlists persist in localStorage**
 
 ### Should Work
 1. ✓ Chromecast button visible and functional
@@ -227,6 +262,9 @@
 3. ✓ Volume boost up to 200%
 4. ✓ A-B repeat section
 5. ✓ DLNA casting to local devices
+6. ✓ **IPTV channel list modal opens and displays**
+7. ✓ **IPTV category filtering works**
+8. ✓ **IPTV search functionality works**
 
 ### Nice to Have
 1. Auto-generated captions
@@ -249,35 +287,89 @@ universal-media-streamer/
 ├── vite.config.ts
 ├── tailwind.config.js
 ├── package.json
-├── tsconfig.json
-├── public/
-│   └── favicon.ico
-└── src/
-    ├── main.tsx
-    ├── App.tsx
-    ├── index.css
-    ├── components/
-    │   ├── Header.tsx
-    │   ├── Sidebar.tsx
-    │   ├── Player.tsx
-    │   ├── ControlBar.tsx
-    │   ├── SettingsModal.tsx
-    │   ├── MediaInput.tsx
-    │   ├── PlayableSourcesModal.tsx
-    │   └── Toast.tsx
-    ├── hooks/
-    │   ├── useLocalStorage.ts
-    │   ├── useMediaSession.ts
-    │   └── useKeyboardShortcuts.ts
-    ├── contexts/
-    │   ├── PlayerContext.tsx
-    │   └── SettingsContext.tsx
-    ├── utils/
-    │   ├── mediaDetector.ts
-    │   ├── formatTime.ts
-    │   ├── constants.ts
-    │   ├── urlExtractor.ts
-    │   └── castUtils.ts
-    └── types/
-        └── index.ts
+├── src/
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── index.css
+│   ├── components/
+│   │   ├── Header.tsx
+│   │   ├── Sidebar.tsx
+│   │   ├── Player.tsx
+│   │   ├── ControlBar.tsx
+│   │   ├── SettingsModal.tsx
+│   │   ├── MediaInput.tsx
+│   │   ├── PlayableSourcesModal.tsx
+│   │   ├── IPTVChannelList.tsx        # NEW
+│   │   └── Toast.tsx
+│   ├── hooks/
+│   │   ├── useLocalStorage.ts
+│   │   ├── useMediaSession.ts
+│   │   └── useKeyboardShortcuts.ts
+│   ├── contexts/
+│   │   ├── PlayerContext.tsx           # Updated for IPTV
+│   │   └── SettingsContext.tsx
+│   ├── utils/
+│   │   ├── mediaDetector.ts           # Updated for IPTV
+│   │   ├── formatTime.ts
+│   │   ├── constants.ts
+│   │   ├── urlExtractor.ts
+│   │   ├── castUtils.ts
+│   │   └── iptvParser.ts               # NEW
+│   └── types/
+│       └── index.ts                   # Updated for IPTV
+└── public/
+    └── favicon.ico
 ```
+
+## IPTV Implementation Details
+
+### M3U Parser
+The IPTV parser (`src/utils/iptvParser.ts`) handles:
+- Standard M3U format parsing
+- Extended M3U (#EXTINF) parsing with attributes:
+  - `tvg-id`: Channel ID for EPG
+  - `tvg-name`: Channel display name
+  - `tvg-logo`: Channel logo URL
+  - `group-title`: Channel category
+  - `category`: Custom category
+- URL validation and filtering
+- Playlist name extraction
+- Channel grouping by category
+- Search functionality
+
+### State Management
+IPTV state is managed through:
+- `playerState.isIPTV`: Boolean flag for IPTV mode
+- `playerState.currentPlaylist`: Current IPTVPlaylist
+- `playerState.currentChannelIndex`: Current channel position
+- localStorage for persistent playlists
+
+### Player Integration
+- IPTV streams use HLS.js like regular HLS
+- Control bar adapts for IPTV (disabled seeking, channel navigation)
+- LIVE indicator shows for duration-less streams
+- Channel name displayed in player overlay
+
+## Design System
+
+### Color Palette
+- **Primary**: #6366f1 (indigo)
+- **IPTV Accent**: #8b5cf6 (violet)
+- **Success**: #22c55e (green)
+- **Warning**: #f59e0b (amber)
+- **Error**: #ef4444 (red)
+- **Background**: #0a0a0f (dark)
+- **Surface**: #141420 (card)
+- **Text Primary**: #f8fafc
+- **Text Secondary**: #94a3b8
+
+### IPTV Specific Colors
+- **IPTV Badge**: Violet background (#8b5cf6)
+- **LIVE Indicator**: Red (#ef4444)
+- **Channel Navigator**: Violet gradient
+- **IPTV Tab**: Violet accent in sidebar
+
+### Responsive Breakpoints
+- **Mobile**: < 640px
+- **Tablet**: 640px - 1024px
+- **Desktop**: > 1024px
