@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Player - Universal Media Streamer Examples</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 900px;
+      width: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    h1 {
+      color: #fff;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 30px;
+    }
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+    input {
+      flex: 1;
+      padding: 14px 20px;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+    input:focus {
+      border-color: #4f46e5;
+    }
+    input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+    button {
+      padding: 14px 28px;
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(79, 70, 229, 0.4);
+    }
+    .presets {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 30px;
+    }
+    .preset {
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .preset:hover {
+      background: rgba(79, 70, 229, 0.3);
+      border-color: #4f46e5;
+    }
+    .player-container {
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .info {
+      margin-top: 20px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+    }
+    .info h3 {
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    .info p {
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.6;
+    }
+    code {
+      background: rgba(79, 70, 229, 0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>YouTube Player</h1>
+    <p class="subtitle">Example: Embedding YouTube videos using Universal Media Streamer</p>
+    
+    <div class="input-group">
+      <input type="text" id="youtubeUrl" placeholder="Paste YouTube URL..." 
+        value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+      <button onclick="loadYouTube()">Load Video</button>
+    </div>
+    
+    <div class="presets">
+      <span class="preset" onclick="setPreset('https://www.youtube.com/watch?v=dQw4w9WgXcQ')">Rick Astley</span>
+      <span class="preset" onclick="setPreset('https://www.youtube.com/watch?v=LXb3EKWsInQ')">Nature</span>
+      <span class="preset" onclick="setPreset('https://www.youtube.com/watch?v=9bZkp7q19f0')">K-Pop</span>
+      <span class="preset" onclick="setPreset('https://youtu.be/jNQXAC9IVRw')">Me at the zoo</span>
+    </div>
+    
+    <div class="player-container" id="playerContainer">
+      <div id="player"></div>
+    </div>
+    
+    <div class="info">
+      <h3>Supported URL Formats</h3>
+      <p>
+        <code>https://youtube.com/watch?v=VIDEO_ID</code><br>
+        <code>https://youtu.be/VIDEO_ID</code><br>
+        <code>https://youtube.com/embed/VIDEO_ID</code><br>
+        <code>https://youtube.com/v/VIDEO_ID</code>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    let player;
+    
+    function extractYouTubeId(url) {
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+      }
+      return null;
+    }
+    
+    function loadYouTube() {
+      const url = document.getElementById('youtubeUrl').value;
+      const videoId = extractYouTubeId(url);
+      
+      if (!videoId) {
+        alert('Invalid YouTube URL');
+        return;
+      }
+      
+      const container = document.getElementById('playerContainer');
+      container.innerHTML = '';
+      
+      const iframe = document.createElement('iframe');
+      iframe.src = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0`;
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      iframe.allowFullscreen = true;
+      container.appendChild(iframe);
+    }
+    
+    function setPreset(url) {
+      document.getElementById('youtubeUrl').value = url;
+      loadYouTube();
+    }
+    
+    loadYouTube();
+  </script>
+</body>
+</html>
