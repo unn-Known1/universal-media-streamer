@@ -23,11 +23,33 @@ A powerful, feature-rich web-based media player that supports streaming from any
 | **Direct Video** | MP4, WebM, MKV, AVI, MOV, WMV, FLV, WEBM | ✅ Full |
 | **HLS Streaming** | .m3u8 | ✅ Full |
 | **DASH Streaming** | .mpd | ✅ Full |
+| **IPTV** | M3U/M3U8 Playlists | ✅ Full |
 | **YouTube** | youtube.com, youtu.be | ✅ Full |
 | **Vimeo** | vimeo.com | ✅ Full |
 | **Dailymotion** | dailymotion.com | ✅ Full |
 | **Google Drive** | drive.google.com | ✅ Full |
 | **Dropbox** | dropbox.com | ✅ Full |
+
+## IPTV Support
+
+The Universal Media Streamer now includes full IPTV support! Load your M3U/M3U8 playlists and watch TV channels directly in the browser.
+
+### Features
+- **Load M3U/M3U8 Playlists**: Paste any IPTV playlist URL to load all channels
+- **Channel Categorization**: Automatic grouping by category/group
+- **Channel Logos**: Display channel logos when available
+- **Channel Navigation**: Quick switching between channels
+- **Playlist History**: Recently used playlists saved
+- **Grid/List View**: Choose your preferred channel display
+- **Search**: Find channels quickly by name
+- **Live Streaming**: HLS-based live TV support
+
+### Supported IPTV Formats
+- Standard M3U playlists
+- Extended M3U with #EXTINF metadata
+- Group titles (group-title)
+- TVG information (tvg-id, tvg-name, tvg-logo)
+- Channel logos
 
 ## Architecture
 
@@ -40,8 +62,8 @@ A powerful, feature-rich web-based media player that supports streaming from any
 ┌────────────────────────────▼────────────────────────────────┐
 │                    URL Processing Layer                      │
 │   ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌────────┐ │
-│   │ URL Parser│  │ YouTube  │  │  Embed     │  │ Direct │ │
-│   │           │  │ Extractor│  │  Handler   │  │  URLs  │ │
+│   │ URL Parser│  │ YouTube  │  │  IPTV      │  │ Direct │ │
+│   │           │  │ Extractor│  │  Parser    │  │  URLs  │ │
 │   └─────┬─────┘  └────┬─────┘  └──────┬─────┘  └───┬────┘ │
 └─────────┼────────────┼──────────────┼────────────┼───────┘
           │            │              │            │
@@ -89,6 +111,14 @@ npm run preview
 - **Playback Speed** - 0.25x to 3x speed control
 - **Quality Selection** - Auto + manual quality switching
 - **Volume Boost** - Up to 200% volume enhancement
+
+### IPTV Features
+- **M3U/M3U8 Playlists** - Load and watch IPTV channels
+- **Channel Categories** - Browse by category/group
+- **Channel Logos** - Visual channel identification
+- **Quick Navigation** - Previous/Next channel buttons
+- **Live Indicators** - Show live stream status
+- **Playlist History** - Quick access to recent playlists
 
 ### Advanced
 - **Picture-in-Picture** - Floating mini player
@@ -147,9 +177,13 @@ universal-media-streamer/
 │   └── sw.js              # Service worker
 ├── src/
 │   ├── components/         # React components
+│   │   ├── IPTVChannelList.tsx  # IPTV channel list modal
+│   │   └── ...
 │   ├── contexts/           # React contexts (settings, player)
 │   ├── hooks/              # Custom hooks
-│   ├── utils/              # Utilities and constants
+│   ├── utils/
+│   │   ├── iptvParser.ts   # IPTV M3U parser
+│   │   └── ...
 │   ├── types/              # TypeScript types
 │   ├── App.tsx             # Main app component
 │   ├── main.tsx            # Entry point
