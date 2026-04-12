@@ -22,12 +22,17 @@ import {
   Languages,
   Moon,
   Sun,
+  Tv,
+  List,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayer } from '../contexts/PlayerContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { formatTime } from '../utils/formatTime';
 import { PLAYBACK_RATES, VOLUME_BOOST_MAX } from '../utils/constants';
+import { IPTVChannel } from '../types';
 
 interface ControlBarProps {
   videoElement: HTMLVideoElement | null;
@@ -49,6 +54,9 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
     setABRepeat,
     clearABRepeat,
     showToast,
+    playNextChannel,
+    playPreviousChannel,
+    currentPlaylist,
   } = usePlayer();
 
   const { settings } = useSettings();
@@ -68,6 +76,12 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
 
   const { currentTime, duration, volume, isMuted, isFullscreen, isLooping, abRepeat, buffered, availableQualities, quality } = playerState;
 
+  // IPTV specific
+  const isIPTV = playerState.isIPTV;
+  const currentIPTVChannel = isIPTV ? (playerState.currentMedia as IPTVChannel) : null;
+  const canPlayPrevious = isIPTV && currentPlaylist && playerState.currentChannelIndex > 0;
+  const canPlayNext = isIPTV && currentPlaylist && playerState.currentChannelIndex < currentPlaylist.channels.length - 1;
+
   // Handle volume changes
   const handleVolumeChange = useCallback((e: React.MouseEvent | MouseEvent) => {
     if (progressRef.current || true) {
@@ -82,13 +96,16 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
 
   // Progress bar interactions
   const handleProgressClick = useCallback((e: React.MouseEvent) => {
+    // Disable seeking for live IPTV streams
+    if (isIPTV && duration === 0) return;
+    
     const rect = progressRef.current?.getBoundingClientRect();
     if (rect) {
       const x = e.clientX - rect.left;
       const percent = x / rect.width;
       seek(percent * duration);
     }
-  }, [duration, seek]);
+  }, [duration, seek, isIPTV]);
 
   const handleProgressHover = useCallback((e: React.MouseEvent) => {
     const rect = progressRef.current?.getBoundingClientRect();
@@ -146,11 +163,11 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
   return (
     <div
       ref={controlsRef}
-      className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300"
+      className="control-bar absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300"
     >
       {/* Hover Time Tooltip */}
       <AnimatePresence>
-        {isHoveringProgress && (
+        {isHoveringProgress && duration > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -163,56 +180,69 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
         )}
       </AnimatePresence>
 
-      {/* Progress Bar */}
-      <div
-        ref={progressRef}
-        className="group relative h-1.5 bg-white/20 rounded-full cursor-pointer mb-4 overflow-hidden"
-        onClick={handleProgressClick}
-        onMouseEnter={() => setIsHoveringProgress(true)}
-        onMouseLeave={() => setIsHoveringProgress(false)}
-        onMouseMove={handleProgressHover}
-      >
-        {/* Buffered */}
+      {/* Progress Bar - Hide for live IPTV streams */}
+      {!(isIPTV && duration === 0) && (
         <div
-          className="absolute top-0 left-0 h-full bg-white/30 rounded-full"
-          style={{ width: `${bufferedPercent}%` }}
-        />
-
-        {/* A-B Repeat Markers */}
-        {abRepeat.start !== null && (
+          ref={progressRef}
+          className="group relative h-1.5 bg-white/20 rounded-full cursor-pointer mb-4 overflow-hidden"
+          onClick={handleProgressClick}
+          onMouseEnter={() => setIsHoveringProgress(true)}
+          onMouseLeave={() => setIsHoveringProgress(false)}
+          onMouseMove={handleProgressHover}
+        >
+          {/* Buffered */}
           <div
-            className="absolute top-0 bottom-0 bg-primary-500/50"
-            style={{
-              left: `${(abRepeat.start / duration) * 100}%`,
-              right: `${100 - (abRepeat.end! / duration) * 100}%`,
-            }}
+            className="absolute top-0 left-0 h-full bg-white/30 rounded-full"
+            style={{ width: `${bufferedPercent}%` }}
           />
-        )}
-        {abRepeat.start !== null && (
-          <div
-            className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-primary-500 rounded-full"
-            style={{ left: `${(abRepeat.start / duration) * 100}%` }}
-          />
-        )}
-        {abRepeat.end !== null && (
-          <div
-            className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-primary-500 rounded-full"
-            style={{ left: `${(abRepeat.end / duration) * 100}%` }}
-          />
-        )}
 
-        {/* Progress */}
-        <div
-          className="absolute top-0 left-0 h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full"
-          style={{ width: `${progressPercent}%` }}
-        />
+          {/* A-B Repeat Markers */}
+          {abRepeat.start !== null && (
+            <div
+              className="absolute top-0 bottom-0 bg-primary-500/50"
+              style={{
+                left: `${(abRepeat.start / duration) * 100}%`,
+                right: `${100 - (abRepeat.end! / duration) * 100}%`,
+              }}
+            />
+          )}
+          {abRepeat.start !== null && (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-primary-500 rounded-full"
+              style={{ left: `${(abRepeat.start / duration) * 100}%` }}
+            />
+          )}
+          {abRepeat.end !== null && (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-primary-500 rounded-full"
+              style={{ left: `${(abRepeat.end / duration) * 100}%` }}
+            />
+          )}
 
-        {/* Scrubber */}
-        <div
-          className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ left: `calc(${progressPercent}% - 8px)` }}
-        />
-      </div>
+          {/* Progress */}
+          <div
+            className="absolute top-0 left-0 h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full"
+            style={{ width: `${progressPercent}%` }}
+          />
+
+          {/* Scrubber */}
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ left: `calc(${progressPercent}% - 8px)` }}
+          />
+        </div>
+      )}
+
+      {/* Live Indicator for IPTV */}
+      {isIPTV && duration === 0 && (
+        <div className="mb-4 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-sm text-slate-400">LIVE</span>
+          {currentIPTVChannel && (
+            <span className="text-sm text-slate-500">• {currentIPTVChannel.name}</span>
+          )}
+        </div>
+      )}
 
       {/* Controls Row */}
       <div className="flex items-center justify-between gap-4">
@@ -231,25 +261,51 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
             )}
           </button>
 
-          {/* Skip Back */}
+          {/* IPTV: Previous Channel */}
+          {isIPTV && (
+            <button
+              onClick={playPreviousChannel}
+              disabled={!canPlayPrevious}
+              className="p-2 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Previous channel"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* Skip Back (disabled for live IPTV) */}
           <button
             onClick={() => seekRelative(-10)}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors group"
+            disabled={isIPTV && duration === 0}
+            className="p-2 rounded-xl hover:bg-white/10 transition-colors group disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Skip back 10 seconds"
           >
-            <SkipBack className="w-5 h-5 group-hover:scale-110 transition-transform" />
-            <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>
+            <SkipBack className={`w-5 h-5 ${!isIPTV ? 'group-hover:scale-110 transition-transform' : ''}`} />
+            {!isIPTV && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
           </button>
 
-          {/* Skip Forward */}
+          {/* Skip Forward (disabled for live IPTV) */}
           <button
             onClick={() => seekRelative(10)}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors group relative"
+            disabled={isIPTV && duration === 0}
+            className="p-2 rounded-xl hover:bg-white/10 transition-colors group relative disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Skip forward 10 seconds"
           >
-            <SkipForward className="w-5 h-5 group-hover:scale-110 transition-transform" />
-            <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>
+            <SkipForward className={`w-5 h-5 ${!isIPTV ? 'group-hover:scale-110 transition-transform' : ''}`} />
+            {!isIPTV && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
           </button>
+
+          {/* IPTV: Next Channel */}
+          {isIPTV && (
+            <button
+              onClick={playNextChannel}
+              disabled={!canPlayNext}
+              className="p-2 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Next channel"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          )}
 
           {/* Volume */}
           <div className="relative flex items-center gap-2">
@@ -282,12 +338,14 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
             )}
           </div>
 
-          {/* Time */}
-          <div className="ml-2 text-sm font-mono tabular-nums">
-            <span>{formatTime(currentTime)}</span>
-            <span className="text-slate-500 mx-1">/</span>
-            <span className="text-slate-400">{formatTime(duration)}</span>
-          </div>
+          {/* Time - hide for live IPTV */}
+          {!isIPTV || duration > 0 ? (
+            <div className="ml-2 text-sm font-mono tabular-nums">
+              <span>{formatTime(currentTime)}</span>
+              <span className="text-slate-500 mx-1">/</span>
+              <span className="text-slate-400">{formatTime(duration)}</span>
+            </div>
+          ) : null}
         </div>
 
         {/* Right Controls */}
@@ -325,11 +383,12 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
             <Repeat className="w-5 h-5" />
           </button>
 
-          {/* Speed */}
+          {/* Speed - disable for live IPTV */}
           <div className="relative">
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-              className="px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-sm font-medium flex items-center gap-1"
+              disabled={isIPTV && duration === 0}
+              className="px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-sm font-medium flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <Gauge className="w-4 h-4" />
               {playerState.playbackRate}x
