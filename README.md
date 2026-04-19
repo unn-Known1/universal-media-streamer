@@ -4,7 +4,7 @@ A powerful, feature-rich web-based media player that supports streaming from any
 
 ## Live Demo
 
-**Test the app:** https://ht55vlcsfd6m.space.minimax.io
+**Test the app:** https://8bxpfde6i3id.space.minimax.io
 
 ## Features
 
@@ -16,6 +16,7 @@ A powerful, feature-rich web-based media player that supports streaming from any
   - Google Drive/Dropbox direct links
 
 - **YouTube URL Support** - Paste any YouTube URL or video ID to play directly
+- **YouTube Search** - Search YouTube and play videos directly in the streamer
 - **Smart URL Detection** - Scan any webpage to find all playable video/audio sources
 
 - **Player Features**:
