@@ -3,15 +3,18 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Player } from './components/Player';
 import { MediaInput } from './components/MediaInput';
+import { YouTubeSearch } from './components/YouTubeSearch';
 import { SettingsModal } from './components/SettingsModal';
 import { ToastContainer } from './components/Toast';
 import { SettingsProvider, initializeTheme, useSettings } from './contexts/SettingsContext';
 import { PlayerProvider, usePlayer } from './contexts/PlayerContext';
+import { Link, Youtube } from 'lucide-react';
 
 function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [inputTab, setInputTab] = useState<'url' | 'youtube'>('url');
   const { settings } = useSettings();
   const { playerState } = usePlayer();
 
@@ -64,7 +67,34 @@ function AppContent() {
 
           {/* Media Input Section */}
           <section className="py-8">
-            <MediaInput />
+            {/* Tab Switcher */}
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setInputTab('url')}
+                className={`flex items-center gap-2 px-5 py-3 rounded-xl transition-all font-medium ${
+                  inputTab === 'url'
+                    ? 'bg-gradient-to-r from-primary-600 to-primary-500 text-white shadow-lg shadow-primary-500/25'
+                    : 'bg-dark-700/50 text-slate-400 hover:text-white hover:bg-dark-700'
+                }`}
+              >
+                <Link className="w-5 h-5" />
+                URL / Stream
+              </button>
+              <button
+                onClick={() => setInputTab('youtube')}
+                className={`flex items-center gap-2 px-5 py-3 rounded-xl transition-all font-medium ${
+                  inputTab === 'youtube'
+                    ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-lg shadow-red-500/25'
+                    : 'bg-dark-700/50 text-slate-400 hover:text-white hover:bg-dark-700'
+                }`}
+              >
+                <Youtube className="w-5 h-5" />
+                YouTube Search
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            {inputTab === 'url' ? <MediaInput /> : <YouTubeSearch />}
           </section>
 
           {/* Features Grid */}
@@ -75,9 +105,9 @@ function AppContent() {
                 { name: 'HLS Streaming', desc: 'Live & VOD .m3u8' },
                 { name: 'DASH Streaming', desc: '.mpd manifests' },
                 { name: 'Direct Video', desc: 'MP4, WebM, MKV' },
+                { name: 'YouTube Search', desc: 'Search & play' },
                 { name: 'Volume Boost', desc: 'Up to 200%' },
                 { name: 'Picture-in-Picture', desc: 'Floating player' },
-                { name: 'Keyboard Shortcuts', desc: 'Full control' },
                 { name: 'A-B Repeat', desc: 'Loop sections' },
                 { name: 'Screenshot', desc: 'Capture frames' },
               ].map((feature) => (
