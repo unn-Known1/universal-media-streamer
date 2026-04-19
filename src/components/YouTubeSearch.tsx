@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Search, Play, Loader2, Clock, Eye, ExternalLink, Youtube } from 'lucide-react';
+import { Search, Play, Loader2, Clock, Eye, ExternalLink, Youtube, AlertCircle, RefreshCw } from 'lucide-react';
 import { usePlayer } from '../contexts/PlayerContext';
 
 interface VideoResult {
@@ -13,6 +13,15 @@ interface VideoResult {
   publishedAt: string;
 }
 
+// Multiple Invidious instances for fallback
+const INVICIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.privacyredirect.com',
+  'https://iv.nboeck.de',
+  'https://invidious.lunar.icu',
+  'https://yewtu.be',
+];
+
 export function YouTubeSearch() {
   const { loadMedia, showToast } = usePlayer();
   const [query, setQuery] = useState('');
@@ -20,8 +29,9 @@ export function YouTubeSearch() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [currentInstance, setCurrentInstance] = useState(0);
 
-  const formatDuration = (isoDuration: string): string => {
+  const formatDuration = (isoDuration: string | null | undefined): string => {
     if (!isoDuration) return '0:00';
     const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
     if (!match) return '0:00';
@@ -34,35 +44,66 @@ export function YouTubeSearch() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const formatViewCount = (views: string): string => {
+  const formatViewCount = (views: string | null | undefined): string => {
     if (!views) return '0';
     const num = parseInt(views);
+    if (isNaN(num)) return '0';
     if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B views`;
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M views`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K views`;
     return `${num} views`;
   };
 
-  const formatTimeAgo = (dateString: string): string => {
+  const formatTimeAgo = (dateString: string | null | undefined): string => {
     if (!dateString) return '';
-    const date = new Date(dateString);
-    const now = new Date();
-    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-    const intervals = [
-      { label: 'year', seconds: 31536000 },
-      { label: 'month', seconds: 2592000 },
-      { label: 'week', seconds: 604800 },
-      { label: 'day', seconds: 86400 },
-      { label: 'hour', seconds: 3600 },
-      { label: 'minute', seconds: 60 },
-    ];
-    for (const interval of intervals) {
-      const count = Math.floor(seconds / interval.seconds);
-      if (count >= 1) {
-        return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+      const intervals = [
+        { label: 'year', seconds: 31536000 },
+        { label: 'month', seconds: 2592000 },
+        { label: 'week', seconds: 604800 },
+        { label: 'day', seconds: 86400 },
+        { label: 'hour', seconds: 3600 },
+        { label: 'minute', seconds: 60 },
+      ];
+      for (const interval of intervals) {
+        const count = Math.floor(seconds / interval.seconds);
+        if (count >= 1) {
+          return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+        }
       }
+      return 'Just now';
+    } catch {
+      return '';
     }
-    return 'Just now';
+  };
+
+  const searchWithInstance = async (instance: string, searchQuery: string): Promise<VideoResult[]> => {
+    const url = `${instance}/api/v1/search?q=${encodeURIComponent(searchQuery)}&type=video&filter=video`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid response format');
+    }
+
+    return data.slice(0, 20).map((item: any) => ({
+      videoId: item.videoId || item.id || '',
+      title: item.title || 'Untitled',
+      channelTitle: item.author || item.authorName || 'Unknown Channel',
+      description: item.description || '',
+      thumbnailUrl: item.thumbnailUrls?.[0] || item.thumbnail || (item.videoId ? `https://img.youtube.com/vi/${item.videoId}/mqdefault.jpg` : ''),
+      duration: formatDuration(item.duration),
+      viewCount: item.viewCount ? String(item.viewCount) : '0',
+      publishedAt: item.published || item.publishedText || '',
+    })).filter((v: VideoResult) => v.videoId);
   };
 
   const searchYouTube = useCallback(async (searchQuery: string) => {
@@ -70,43 +111,28 @@ export function YouTubeSearch() {
 
     setIsLoading(true);
     setError(null);
+    setResults([]);
 
-    try {
-      const response = await fetch(
-        `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(searchQuery)}&type=video&filter=video`
-      );
+    // Try each instance until one works
+    for (let i = 0; i < INVICIOUS_INSTANCES.length; i++) {
+      try {
+        setCurrentInstance(i);
+        const videos = await searchWithInstance(INVICIOUS_INSTANCES[i], searchQuery);
 
-      if (!response.ok) {
-        throw new Error('Search failed');
+        if (videos.length > 0) {
+          setResults(videos);
+          setError(null);
+          return;
+        }
+      } catch (err) {
+        console.log(`Instance ${INVICIOUS_INSTANCES[i]} failed, trying next...`);
+        continue;
       }
-
-      const data = await response.json();
-
-      if (!Array.isArray(data) || data.length === 0) {
-        setResults([]);
-        setError('No results found. Try a different search term.');
-        return;
-      }
-
-      const videos: VideoResult[] = data.slice(0, 20).map((item: any) => ({
-        videoId: item.videoId,
-        title: item.title || 'Untitled',
-        channelTitle: item.author || 'Unknown Channel',
-        description: item.description || '',
-        thumbnailUrl: item.thumbnailUrls?.[0] || item.thumbnail || `https://img.youtube.com/vi/${item.videoId}/mqdefault.jpg`,
-        duration: formatDuration(item.duration),
-        viewCount: item.viewCount || '0',
-        publishedAt: item.published || '',
-      }));
-
-      setResults(videos);
-    } catch (err) {
-      console.error('YouTube search error:', err);
-      setError('Search failed. Please try again.');
-      setResults([]);
-    } finally {
-      setIsLoading(false);
     }
+
+    // All instances failed
+    setError('Unable to connect to YouTube. Please try again later.');
+    setResults([]);
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -114,8 +140,14 @@ export function YouTubeSearch() {
     searchYouTube(query);
   };
 
+  const handleRetry = () => {
+    setCurrentInstance(0);
+    searchYouTube(query);
+  };
+
   const handlePlayVideo = (video: VideoResult) => {
     setPlayingId(video.videoId);
+    // Use YouTube embed URL
     const youtubeUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
     loadMedia(youtubeUrl, video.title);
     showToast(`Playing: ${video.title}`, 'success');
@@ -130,6 +162,7 @@ export function YouTubeSearch() {
 
   return (
     <div className="w-full max-w-4xl mx-auto">
+      {/* Search Header */}
       <div className="flex items-center gap-3 mb-6">
         <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
           <Youtube className="w-6 h-6 text-red-500" />
@@ -138,6 +171,7 @@ export function YouTubeSearch() {
         <span className="text-sm text-slate-500">Search and play directly</span>
       </div>
 
+      {/* Search Form */}
       <form onSubmit={handleSearch} className="relative mb-6">
         <div className="absolute left-4 top-1/2 -translate-y-1/2">
           <Search className="w-5 h-5 text-slate-400" />
@@ -166,13 +200,38 @@ export function YouTubeSearch() {
         </button>
       </form>
 
-      {error && (
-        <div className="text-center py-8">
-          <p className="text-red-400">{error}</p>
+      {/* Loading State */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="w-16 h-16 mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+          </div>
+          <p className="text-slate-400 mb-2">Searching YouTube...</p>
+          <p className="text-xs text-slate-500">
+            Using: {INVICIOUS_INSTANCES[currentInstance]}
+          </p>
         </div>
       )}
 
-      {results.length > 0 && (
+      {/* Error Message */}
+      {error && !isLoading && (
+        <div className="text-center py-8">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-red-400" />
+          </div>
+          <p className="text-red-400 mb-4">{error}</p>
+          <button
+            onClick={handleRetry}
+            className="flex items-center gap-2 mx-auto px-6 py-3 rounded-xl bg-dark-700 hover:bg-dark-600 transition-colors text-white"
+          >
+            <RefreshCw className="w-5 h-5" />
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {/* Search Results */}
+      {results.length > 0 && !isLoading && (
         <div className="space-y-3">
           <p className="text-sm text-slate-500 mb-4">{results.length} results found</p>
           {results.map((video) => (
@@ -180,9 +239,10 @@ export function YouTubeSearch() {
               key={video.videoId}
               className="flex gap-4 p-4 rounded-2xl bg-dark-700/30 hover:bg-dark-700/50 border border-white/5 hover:border-red-500/20 transition-all group"
             >
+              {/* Thumbnail */}
               <div className="relative flex-shrink-0">
                 <img
-                  src={video.thumbnailUrl}
+                  src={video.thumbnailUrl || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`}
                   alt={video.title}
                   className="w-48 h-28 object-cover rounded-xl"
                   onError={(e) => {
@@ -201,6 +261,7 @@ export function YouTubeSearch() {
                 )}
               </div>
 
+              {/* Info */}
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-white line-clamp-2 mb-2 group-hover:text-red-400 transition-colors">
                   {video.title}
@@ -220,6 +281,7 @@ export function YouTubeSearch() {
                 </div>
               </div>
 
+              {/* Actions */}
               <div className="flex flex-col justify-center gap-2">
                 <button
                   onClick={() => handlePlayVideo(video)}
@@ -244,6 +306,7 @@ export function YouTubeSearch() {
         </div>
       )}
 
+      {/* Empty State */}
       {!isLoading && results.length === 0 && !error && (
         <div className="text-center py-16">
           <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-dark-700 flex items-center justify-center">
@@ -254,6 +317,7 @@ export function YouTubeSearch() {
         </div>
       )}
 
+      {/* Popular Searches */}
       {!isLoading && results.length === 0 && !error && (
         <div className="mt-8">
           <p className="text-sm text-slate-500 mb-3">Popular searches:</p>
