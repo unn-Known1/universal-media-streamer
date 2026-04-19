@@ -14,7 +14,6 @@ import {
   Clipboard,
   Tv,
   List,
-  X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayer } from '../contexts/PlayerContext';
@@ -35,13 +34,13 @@ export function MediaInput() {
   const [validation, setValidation] = useState<{ valid: boolean; message?: string }>({ valid: true });
   const [isDragging, setIsDragging] = useState(false);
   const [showSourcesModal, setShowSourcesModal] = useState(false);
-  
+
   // IPTV specific state
   const [showIPTVList, setShowIPTVList] = useState(false);
   const [currentPlaylist, setCurrentPlaylist] = useState<IPTVPlaylist | null>(null);
   const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
   const [savedPlaylists, setSavedPlaylists] = useLocalStorage<IPTVPlaylist[]>('ums-iptv-playlists', []);
-  
+
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,7 +80,7 @@ export function MediaInput() {
 
     // Check if URL is IPTV playlist
     const mediaType = detectMediaType(url);
-    
+
     if (mediaType === 'iptv') {
       await loadIPTVPlaylistFromUrl(url);
       return;
@@ -113,19 +112,19 @@ export function MediaInput() {
     try {
       const playlist = await loadIPTVPlaylist(playlistUrl);
       setCurrentPlaylist(playlist);
-      
+
       // Save to recent playlists
       setSavedPlaylists((prev) => {
         const filtered = prev.filter(p => p.url !== playlistUrl);
         return [playlist, ...filtered].slice(0, 10);
       });
-      
+
       // Update settings
       updateSettings({ iptvLastPlaylist: playlistUrl });
-      
+
       // Show channel list
       setShowIPTVList(true);
-      
+
       if (playlist.channels.length > 0) {
         showToast(`Loaded ${playlist.channels.length} channels from ${playlist.name}`, 'success');
       } else {
@@ -407,8 +406,8 @@ export function MediaInput() {
           {/* IPTV Button */}
           <button
             type="button"
-            onClick={handleScanForSources}
-            disabled={!url.trim()}
+            onClick={() => isIPTV ? setShowIPTVList(true) : handleScanForSources()}
+            disabled={!url.trim() || !isIPTV}
             className="h-12 px-4 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-violet-500/25"
             title={isIPTV ? 'Open IPTV Channels' : 'Scan for playable sources'}
           >

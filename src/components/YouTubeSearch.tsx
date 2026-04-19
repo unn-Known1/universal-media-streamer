@@ -1,105 +1,142 @@
 import React, { useState, useCallback } from 'react';
-import { Search, Play, Loader2, ExternalLink, Youtube, AlertCircle, Link as LinkIcon } from 'lucide-react';
+import { Search, Play, Loader2, ExternalLink, Youtube, AlertCircle, Clock, Eye } from 'lucide-react';
 import { usePlayer } from '../contexts/PlayerContext';
 
-interface VideoInfo {
+interface VideoResult {
   videoId: string;
   title: string;
+  channelTitle: string;
   thumbnailUrl: string;
+  duration: string;
+  viewCount: string;
+  publishedTime: string;
 }
 
 export function YouTubeSearch() {
   const { loadMedia, showToast } = usePlayer();
   const [query, setQuery] = useState('');
-  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [results, setResults] = useState<VideoResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
   // Extract YouTube video ID from various URL formats
   const extractVideoId = (input: string): string | null => {
-    // Direct video ID (11 characters)
-    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) {
-      return input;
+    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+    const patterns = [
+      /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/,
+      /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/live\/([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+    ];
+    for (const pattern of patterns) {
+      const match = input.match(pattern);
+      if (match) return match[1];
     }
-
-    // Standard watch URL: youtube.com/watch?v=VIDEO_ID
-    const watchMatch = input.match(/youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/);
-    if (watchMatch) return watchMatch[1];
-
-    // Short URL: youtu.be/VIDEO_ID
-    const shortMatch = input.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-    if (shortMatch) return shortMatch[1];
-
-    // Embed URL: youtube.com/embed/VIDEO_ID
-    const embedMatch = input.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/);
-    if (embedMatch) return embedMatch[1];
-
-    // Live URL: youtube.com/live/VIDEO_ID
-    const liveMatch = input.match(/youtube\.com\/live\/([a-zA-Z0-9_-]{11})/);
-    if (liveMatch) return liveMatch[1];
-
-    // Shorts URL: youtube.com/shorts/VIDEO_ID
-    const shortsMatch = input.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/);
-    if (shortsMatch) return shortsMatch[1];
-
-    // Batch conversion URL
-    const batchMatch = input.match(/youtube\.com\/batch\/([a-zA-Z0-9_-]{11})/);
-    if (batchMatch) return batchMatch[1];
-
     return null;
   };
 
-  // Fetch video info from YouTube oEmbed API (CORS friendly)
-  const fetchVideoInfo = async (videoId: string): Promise<VideoInfo> => {
+  // Fetch video info from YouTube oEmbed API
+  const fetchVideoInfo = async (videoId: string): Promise<VideoResult> => {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
     const response = await fetch(oembedUrl);
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch video info');
-    }
-
+    if (!response.ok) throw new Error('Failed to fetch');
     const data = await response.json();
     return {
       videoId,
       title: data.title || 'YouTube Video',
+      channelTitle: data.author_name || 'Unknown',
       thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+      duration: '',
+      viewCount: '',
+      publishedTime: '',
     };
   };
 
-  // Search by parsing YouTube search results (no API needed)
+  // Search using YouTube's autocomplete/suggest API with JSONP
   const searchYouTube = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim()) return;
 
     setIsLoading(true);
     setError(null);
-    setVideoInfo(null);
+    setResults([]);
 
     try {
+      // Check if it's a URL first
       const videoId = extractVideoId(searchQuery);
-
       if (videoId) {
-        // It's a YouTube URL or video ID
         const info = await fetchVideoInfo(videoId);
-        setVideoInfo(info);
-        setError(null);
-      } else {
-        // It's a search query - convert to YouTube search URL
-        // Use YouTube's native search with no external API
+        setResults([info]);
+        return;
+      }
+
+      // Search using Google search API (no CORS issues)
+      const response = await fetch(
+        `https://www.google.com/search?q=${encodeURIComponent(searchQuery + ' site:youtube.com')}&num=10&format=json`
+      ).catch(() => null);
+
+      // Fallback: Use YouTube's suggestions JSONP endpoint
+      const suggestionUrl = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${encodeURIComponent(searchQuery)}&callback=?`;
+
+      // Create a JSONP request manually
+      const jsonpResults = await new Promise<any>((resolve, reject) => {
+        const callbackName = 'ytSearchCallback';
+        const script = document.createElement('script');
+        script.src = suggestionUrl.replace('callback=?', `callback=${callbackName}`);
+
+        (window as any)[callbackName] = (data: any) => {
+          delete (window as any)[callbackName];
+          document.body.removeChild(script);
+          resolve(data);
+        };
+
+        script.onerror = () => {
+          delete (window as any)[callbackName];
+          document.body.removeChild(script);
+          reject(new Error('JSONP failed'));
+        };
+
+        document.body.appendChild(script);
+
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          if ((window as any)[callbackName]) {
+            delete (window as any)[callbackName];
+            document.body.removeChild(script);
+            reject(new Error('Timeout'));
+          }
+        }, 5000);
+      });
+
+      // Parse JSONP results and get suggestions
+      const suggestions: string[] = jsonpResults[1] || [];
+
+      if (suggestions.length > 0) {
+        // For each suggestion, we'll show it as a clickable option
+        // The user can then use the URL tab to paste the actual YouTube link
         const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
 
-        // Since we can't fetch YouTube directly due to CORS,
-        // we'll provide the URL and let the user copy it
-        setError(`Search URL: ${searchUrl}`);
-        showToast('Opening YouTube search...', 'success');
+        // Create mock results for display (actual search happens externally)
+        setResults([{
+          videoId: `search:${searchQuery}`,
+          title: `Search results for "${searchQuery}"`,
+          channelTitle: 'Click "Open YouTube Search" below',
+          thumbnailUrl: '',
+          duration: '',
+          viewCount: '',
+          publishedTime: '',
+        }]);
 
-        // Open in new tab as fallback
-        window.open(searchUrl, '_blank');
+        showToast('Click "Open YouTube Search" to see results', 'success');
       }
     } catch (err) {
-      console.error('YouTube error:', err);
-      setError('Failed to load video. Please check the URL.');
-      showToast('Failed to load YouTube video', 'error');
+      console.error('Search error:', err);
+
+      // Final fallback: Open YouTube search directly
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+      window.open(searchUrl, '_blank');
+      showToast('Opening YouTube search in new tab', 'info');
     } finally {
       setIsLoading(false);
     }
@@ -110,20 +147,30 @@ export function YouTubeSearch() {
     searchYouTube(query);
   };
 
-  const handlePlayVideo = () => {
-    if (!videoInfo) return;
+  const handlePlayVideo = (video: VideoResult) => {
+    // Check if it's a search result or actual video
+    if (video.videoId.startsWith('search:')) {
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+      window.open(searchUrl, '_blank');
+      return;
+    }
 
-    setPlayingId(videoInfo.videoId);
-    const youtubeUrl = `https://www.youtube.com/watch?v=${videoInfo.videoId}`;
-    loadMedia(youtubeUrl, videoInfo.title);
-    showToast(`Playing: ${videoInfo.title}`, 'success');
+    setPlayingId(video.videoId);
+    const youtubeUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
+    loadMedia(youtubeUrl, video.title);
+    showToast(`Playing: ${video.title}`, 'success');
     setTimeout(() => setPlayingId(null), 2000);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      searchYouTube(query);
+  const handleOpenYouTubeSearch = () => {
+    if (query.trim()) {
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+      window.open(searchUrl, '_blank');
     }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') searchYouTube(query);
   };
 
   return (
@@ -132,141 +179,154 @@ export function YouTubeSearch() {
       <div className="flex items-center gap-3 mb-6">
         <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
           <Youtube className="w-6 h-6 text-red-500" />
-          <span className="font-semibold text-red-400">YouTube</span>
+          <span className="font-semibold text-red-400">YouTube Search</span>
         </div>
-        <span className="text-sm text-slate-500">Paste URL or video ID to play</span>
+        <span className="text-sm text-slate-500">Search or paste URL to play</span>
       </div>
 
       {/* Search Form */}
       <form onSubmit={handleSearch} className="relative mb-6">
         <div className="absolute left-4 top-1/2 -translate-y-1/2">
-          <LinkIcon className="w-5 h-5 text-slate-400" />
+          <Search className="w-5 h-5 text-slate-400" />
         </div>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Paste YouTube URL or video ID (e.g., dQw4w9WgXcQ)"
-          className="w-full h-14 pl-12 pr-32 rounded-2xl bg-dark-700/50 border-2 border-white/10 focus:border-red-500/50 focus:ring-4 focus:ring-red-500/10 outline-none transition-all"
+          placeholder="Search videos or paste YouTube URL..."
+          className="w-full h-14 pl-12 pr-36 rounded-2xl bg-dark-700/50 border-2 border-white/10 focus:border-red-500/50 focus:ring-4 focus:ring-red-500/10 outline-none transition-all"
         />
-        <button
-          type="submit"
-          disabled={isLoading || !query.trim()}
-          className="absolute right-2 top-1/2 -translate-y-1/2 h-10 px-6 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold flex items-center gap-2"
-        >
-          {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <>
-              <Search className="w-5 h-5" />
-              Load
-            </>
-          )}
-        </button>
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
+          <button
+            type="submit"
+            disabled={isLoading || !query.trim()}
+            className="h-10 px-4 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold flex items-center gap-2"
+          >
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
+          </button>
+        </div>
       </form>
 
       {/* Loading State */}
       {isLoading && (
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="w-16 h-16 mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
-          </div>
-          <p className="text-slate-400">Loading YouTube video...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-red-500 mb-4" />
+          <p className="text-slate-400">Searching...</p>
         </div>
       )}
 
-      {/* Error Message */}
-      {error && !isLoading && !videoInfo && (
-        <div className="text-center py-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
-            <AlertCircle className="w-8 h-8 text-red-400" />
-          </div>
-          <p className="text-red-400 mb-2">Invalid YouTube URL</p>
-          <p className="text-slate-500 text-sm">Please paste a valid YouTube URL or 11-character video ID</p>
-        </div>
-      )}
-
-      {/* Video Preview */}
-      {videoInfo && !isLoading && (
-        <div className="flex gap-4 p-4 rounded-2xl bg-dark-700/50 border border-white/10">
-          {/* Thumbnail */}
-          <div className="relative flex-shrink-0">
-            <img
-              src={videoInfo.thumbnailUrl}
-              alt={videoInfo.title}
-              className="w-48 h-28 object-cover rounded-xl"
-            />
-            {playingId === videoInfo.videoId && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-xl">
-                <div className="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center">
-                  <Loader2 className="w-6 h-6 animate-spin text-white" />
+      {/* Search Results */}
+      {!isLoading && results.length > 0 && (
+        <div className="space-y-3">
+          {results.map((video, index) => (
+            <div
+              key={`${video.videoId}-${index}`}
+              className="flex gap-4 p-4 rounded-2xl bg-dark-700/50 border border-white/10 hover:border-red-500/30 transition-all group"
+            >
+              {video.thumbnailUrl ? (
+                <div className="relative flex-shrink-0">
+                  <img
+                    src={video.thumbnailUrl}
+                    alt={video.title}
+                    className="w-48 h-28 object-cover rounded-xl"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
                 </div>
+              ) : (
+                <div className="w-48 h-28 flex-shrink-0 rounded-xl bg-dark-700 flex items-center justify-center">
+                  <Youtube className="w-10 h-10 text-slate-500" />
+                </div>
+              )}
+
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-white line-clamp-2 mb-1 group-hover:text-red-400 transition-colors">
+                  {video.title}
+                </h3>
+                <p className="text-sm text-slate-400 mb-1">{video.channelTitle}</p>
+                {video.duration && (
+                  <div className="flex items-center gap-3 text-xs text-slate-500">
+                    <span className="flex items-center gap-1">
+                      <Eye className="w-3 h-3" /> {video.viewCount || '0 views'}
+                    </span>
+                    {video.publishedTime && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> {video.publishedTime}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-white line-clamp-2 mb-2">
-              {videoInfo.title}
-            </h3>
-            <p className="text-sm text-slate-400 mb-2">Video ID: {videoInfo.videoId}</p>
-          </div>
+              <div className="flex flex-col justify-center gap-2">
+                {video.videoId.startsWith('search:') ? (
+                  <button
+                    onClick={handleOpenYouTubeSearch}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 transition-all font-semibold text-sm"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open YouTube Search
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handlePlayVideo(video)}
+                    disabled={playingId === video.videoId}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 transition-all font-semibold text-sm"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    Play
+                  </button>
+                )}
+                <a
+                  href={`https://youtube.com/watch?v=${video.videoId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-dark-600 hover:bg-white/10 transition-colors text-xs text-slate-400 hover:text-white"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  YouTube
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-          {/* Actions */}
-          <div className="flex flex-col justify-center gap-2">
-            <button
-              onClick={handlePlayVideo}
-              disabled={playingId === videoInfo.videoId}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold"
-            >
-              <Play className="w-5 h-5 fill-white" />
-              Play Now
-            </button>
-            <a
-              href={`https://youtube.com/watch?v=${videoInfo.videoId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-1 px-4 py-2 rounded-lg bg-dark-600 hover:bg-white/10 transition-colors text-sm text-slate-400 hover:text-white"
-            >
-              <ExternalLink className="w-4 h-4" />
-              YouTube
-            </a>
+      {/* Empty State */}
+      {!isLoading && results.length === 0 && (
+        <div className="text-center py-12">
+          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-dark-700 flex items-center justify-center">
+            <Search className="w-10 h-10 text-slate-500" />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-300 mb-2">Search YouTube</h3>
+          <p className="text-slate-500 mb-4">Enter a search term or paste a YouTube URL</p>
+
+          {/* Popular Categories */}
+          <div className="mt-6">
+            <p className="text-sm text-slate-500 mb-3">Popular searches:</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {['Music', 'Gaming', 'News', 'Tech', 'Sports', 'Movies'].map((term) => (
+                <button
+                  key={term}
+                  onClick={() => {
+                    setQuery(term);
+                    searchYouTube(term);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-dark-700/50 hover:bg-white/10 border border-white/5 hover:border-white/20 transition-all text-sm text-slate-400 hover:text-white"
+                >
+                  {term}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Supported URL Formats */}
+      {/* Supported Formats Help */}
       <div className="mt-8 p-4 rounded-xl bg-dark-700/30 border border-white/5">
-        <h4 className="font-medium text-slate-300 mb-3">Supported YouTube URL Formats:</h4>
-        <div className="grid gap-2 text-sm text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">•</span>
-            <code className="bg-dark-700 px-2 py-1 rounded text-xs">https://youtube.com/watch?v=VIDEO_ID</code>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">•</span>
-            <code className="bg-dark-700 px-2 py-1 rounded text-xs">https://youtu.be/VIDEO_ID</code>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">•</span>
-            <code className="bg-dark-700 px-2 py-1 rounded text-xs">https://youtube.com/embed/VIDEO_ID</code>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">•</span>
-            <code className="bg-dark-700 px-2 py-1 rounded text-xs">https://youtube.com/shorts/VIDEO_ID</code>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">•</span>
-            <span className="text-slate-400">Or just paste the 11-character video ID</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Links */}
-      <div className="mt-6">
-        <p className="text-sm text-slate-500 mb-3">Quick access:</p>
+        <h4 className="font-medium text-slate-300 mb-3">Quick access:</h4>
         <div className="flex flex-wrap gap-2">
           {[
             { label: 'Rick Roll', id: 'dQw4w9WgXcQ' },
