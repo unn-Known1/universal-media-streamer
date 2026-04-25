@@ -11,7 +11,7 @@ interface SettingsModalProps {
   onShowShortcuts: () => void;
 }
 
-type TabType = 'appearance' | 'playback' | 'subtitles' | 'shortcuts' | 'about';
+type TabType = 'appearance' | 'playback' | 'subtitles' | 'shortcuts' | 'about' | 'streaming';
 
 const ACCENT_COLORS = [
   '#6366f1', // Indigo
@@ -26,9 +26,18 @@ const ACCENT_COLORS = [
   '#3b82f6', // Blue
 ];
 
+// Twitch channel settings
+interface TwitchChannel {
+  channelName: string;
+  quality: 'source' | 'high' | 'medium' | 'low';
+  enabled: boolean;
+}
+
 export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts }: SettingsModalProps) {
   const { settings, setTheme, setAccentColor, updateSettings } = useSettings();
   const [activeTab, setActiveTab] = useState<TabType>('appearance');
+  const [twitchChannels, setTwitchChannels] = useState<TwitchChannel[]>([]);
+  const [newTwitchChannel, setNewTwitchChannel] = useState('');
 
   React.useEffect(() => {
     if (showShortcuts) {
@@ -44,6 +53,7 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
     { id: 'playback' as const, label: 'Playback', icon: Play },
     { id: 'subtitles' as const, label: 'Subtitles', icon: Subtitles },
     { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
+    { id: 'streaming' as const, label: 'Streaming', icon: Sparkles },
     { id: 'about' as const, label: 'About', icon: Info },
   ];
 
@@ -298,6 +308,120 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                         </kbd>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'streaming' && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Twitch Streaming</h3>
+                    <p className="text-sm text-slate-400 mb-4">
+                      Add Twitch channels to watch live streams directly in the player.
+                    </p>
+                  </div>
+
+                  {/* Add Channel Form */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newTwitchChannel}
+                      onChange={(e) => setNewTwitchChannel(e.target.value)}
+                      placeholder="Enter Twitch channel name"
+                      className="flex-1 px-4 py-2 rounded-lg bg-dark-700 border border-white/10 focus:border-primary-500 outline-none"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newTwitchChannel.trim()) {
+                          setTwitchChannels([...twitchChannels, {
+                            channelName: newTwitchChannel.trim().toLowerCase(),
+                            quality: 'source',
+                            enabled: true
+                          }]);
+                          setNewTwitchChannel('');
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (newTwitchChannel.trim()) {
+                          setTwitchChannels([...twitchChannels, {
+                            channelName: newTwitchChannel.trim().toLowerCase(),
+                            quality: 'source',
+                            enabled: true
+                          }]);
+                          setNewTwitchChannel('');
+                        }
+                      }}
+                      className="px-4 py-2 bg-primary-500 hover:bg-primary-600 rounded-lg transition-colors"
+                    >
+                      Add Channel
+                    </button>
+                  </div>
+
+                  {/* Channel List */}
+                  <div className="space-y-2">
+                    {twitchChannels.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-dark-700/50 text-center">
+                        <p className="text-slate-400">No channels added yet</p>
+                        <p className="text-sm text-slate-500 mt-1">Add a Twitch channel above to get started</p>
+                      </div>
+                    ) : (
+                      twitchChannels.map((channel, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-3 rounded-lg bg-dark-700/50 border border-white/5"
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={channel.enabled}
+                              onChange={() => {
+                                const updated = [...twitchChannels];
+                                updated[index].enabled = !updated[index].enabled;
+                                setTwitchChannels(updated);
+                              }}
+                              className="w-4 h-4 rounded accent-primary-500"
+                            />
+                            <div>
+                              <p className="font-medium">{channel.channelName}</p>
+                              <p className="text-xs text-slate-500">twitch.tv/{channel.channelName}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={channel.quality}
+                              onChange={(e) => {
+                                const updated = [...twitchChannels];
+                                updated[index].quality = e.target.value as TwitchChannel['quality'];
+                                setTwitchChannels(updated);
+                              }}
+                              className="px-2 py-1 rounded bg-dark-600 text-sm border border-white/10"
+                            >
+                              <option value="source">Source</option>
+                              <option value="high">High</option>
+                              <option value="medium">Medium</option>
+                              <option value="low">Low</option>
+                            </select>
+                            <button
+                              onClick={() => setTwitchChannels(twitchChannels.filter((_, i) => i !== index))}
+                              className="p-2 text-red-400 hover:bg-red-400/20 rounded-lg transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Stream Info */}
+                  <div className="p-4 rounded-xl bg-dark-700/50">
+                    <h4 className="font-medium mb-2">How Twitch Streaming Works</h4>
+                    <ul className="text-sm text-slate-400 space-y-2">
+                      <li>• Streams are played using the HLS protocol via Twitch's player API</li>
+                      <li>• Enter a channel name to add it to your streaming list</li>
+                      <li>• Click on a channel to switch the player to that stream</li>
+                      <li>• Quality settings control the stream resolution preference</li>
+                    </ul>
                   </div>
                 </div>
               )}
