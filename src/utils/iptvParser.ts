@@ -206,6 +206,34 @@ function isNonStreamUrl(url: string): boolean {
 }
 
 /**
+ * Detect whether playlist content is a single media stream (HLS master/media
+ * playlist) rather than an IPTV channel list. IPTV channel playlists have
+ * #EXTINF entries with channel names and group titles; media playlists use
+ * #EXT-X-STREAM-INF / #EXT-X-TARGETDURATION and media segment extensions.
+ */
+export function looksLikeMediaPlaylist(content: string): boolean {
+  const upper = content.toUpperCase();
+  const segmentExtensions = /\.(ts|m4s|m4v|mp4|aac|mp3|webm|vtt)([?#"'\s]|$)/i;
+
+  // Master playlist (multi-variant) - definitely media
+  if (/#EXT-X-STREAM-INF:/i.test(content)) return true;
+  if (/#EXT-X-MEDIA:/.test(content) && /TYPE=SUBTITLES|TYPE=AUDIO|TYPE=VIDEO/i.test(content)) return true;
+
+  // Media playlist with target duration and segments
+  if (/#EXT-X-TARGETDURATION:/.test(upper) || /#EXT-X-MEDIA-SEQUENCE:/.test(upper)) {
+    // Count lines that look like channel entries vs segments
+    const infLines = content.split(/\r?\n/).filter((l) => l.trim().startsWith('#EXTINF')).length;
+    const segmentLines = content.split(/\r?\n/).filter((l) => {
+      const t = l.trim();
+      return t && !t.startsWith('#') && segmentExtensions.test(t);
+    }).length;
+    return segmentLines >= infLines || segmentLines > 0;
+  }
+
+  return false;
+}
+
+/**
  * Load and parse IPTV playlist from URL
  */
 export async function loadIPTVPlaylist(url: string): Promise<IPTVPlaylist> {
@@ -243,6 +271,7 @@ export async function loadIPTVPlaylist(url: string): Promise<IPTVPlaylist> {
       url: url,
       channels: channels,
       addedAt: Date.now(),
+      isMediaPlaylist: looksLikeMediaPlaylist(content),
     };
   } catch (error) {
     throw new Error(`Failed to load IPTV playlist: ${error instanceof Error ? error.message : 'Unknown error'}`);

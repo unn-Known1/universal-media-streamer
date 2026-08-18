@@ -3,6 +3,7 @@ import {
   MEDIA_EXTENSIONS,
   YOUTUBE_PATTERNS,
   VIMEO_PATTERN,
+  TWITCH_PATTERN,
   GOOGLE_DRIVE_PATTERN,
   DROPBOX_PATTERN,
 } from './constants';
@@ -21,6 +22,11 @@ export function detectMediaType(url: string): MediaType {
     return 'vimeo';
   }
 
+  // Check for Twitch
+  if (TWITCH_PATTERN.test(url)) {
+    return 'twitch';
+  }
+
   // Check for Google Drive
   if (GOOGLE_DRIVE_PATTERN.test(url)) {
     return 'google-drive';
@@ -31,12 +37,9 @@ export function detectMediaType(url: string): MediaType {
     return 'dropbox';
   }
 
-  // Check for IPTV playlist before file extensions
-  if (isIPTVPlaylistUrl(url)) {
-    return 'iptv';
-  }
-
-  // Check file extensions
+  // Check file extensions FIRST so direct media files (even those whose
+  // path contains "live/", "stream/", "playlist/" etc.) are never
+  // misclassified as IPTV playlists.
   const urlLower = url.toLowerCase();
   for (const [ext, type] of Object.entries(MEDIA_EXTENSIONS)) {
     if (urlLower.endsWith(ext)) {
@@ -52,6 +55,11 @@ export function detectMediaType(url: string): MediaType {
   // Check for DASH
   if (urlLower.includes('mpd')) {
     return 'dash';
+  }
+
+  // Check for IPTV playlist (only after we know it is not a direct stream)
+  if (isIPTVPlaylistUrl(url)) {
+    return 'iptv';
   }
 
   return 'unknown';
@@ -73,6 +81,7 @@ export function getMediaTypeLabel(type: MediaType): string {
     'google-drive': 'Google Drive',
     dropbox: 'Dropbox',
     iptv: 'IPTV',
+    twitch: 'Twitch',
     unknown: 'Unknown',
   };
   return labels[type];
@@ -89,6 +98,7 @@ export function getMediaTypeColor(type: MediaType): string {
     'google-drive': '#3b82f6',
     dropbox: '#0061fe',
     iptv: '#8b5cf6',
+    twitch: '#9146ff',
     unknown: '#94a3b8',
   };
   return colors[type];
@@ -106,6 +116,11 @@ export function extractYoutubeId(url: string): string | null {
 
 export function extractVimeoId(url: string): string | null {
   const match = url.match(VIMEO_PATTERN);
+  return match ? match[1] : null;
+}
+
+export function extractTwitchChannel(url: string): string | null {
+  const match = url.match(TWITCH_PATTERN);
   return match ? match[1] : null;
 }
 
@@ -136,11 +151,20 @@ export function getEmbedUrl(url: string): string {
   switch (type) {
     case 'youtube': {
       const videoId = extractYoutubeId(url);
-      return `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      return `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
     }
     case 'vimeo': {
       const videoId = extractVimeoId(url);
       return `https://player.vimeo.com/video/${videoId}?autoplay=1`;
+    }
+    case 'twitch': {
+      const channel = extractTwitchChannel(url);
+      if (channel) {
+        const parent = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+        return `https://player.twitch.tv/?channel=${channel}&parent=${parent}&autoplay=true`;
+      }
+      return url;
     }
     case 'google-drive':
       return convertGoogleDriveUrl(url);

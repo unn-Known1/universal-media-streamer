@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [storedValue, setStoredValue] = useState<T>(() => {
@@ -11,22 +11,32 @@ export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T 
     }
   });
 
+  // Keep a live ref of the current value so multiple functional updates
+  // within the same render cycle never operate on stale state.
+  const valueRef = useRef(storedValue);
+  valueRef.current = storedValue;
+
   const setValue = useCallback((value: T | ((prev: T) => T)) => {
     try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      const prev = valueRef.current;
+      const valueToStore = value instanceof Function ? value(prev) : value;
+      valueRef.current = valueToStore;
       setStoredValue(valueToStore);
       window.localStorage.setItem(key, JSON.stringify(valueToStore));
     } catch (error) {
       console.warn(`Error setting localStorage key "${key}":`, error);
     }
-  }, [key, storedValue]);
+  }, [key]);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === key && e.newValue) {
         try {
-          setStoredValue(JSON.parse(e.newValue));
+          const parsed = JSON.parse(e.newValue);
+          valueRef.current = parsed;
+          setStoredValue(parsed);
         } catch {
+          valueRef.current = initialValue;
           setStoredValue(initialValue);
         }
       }
@@ -49,15 +59,20 @@ export function useSessionStorage<T>(key: string, initialValue: T): [T, (value: 
     }
   });
 
+  const valueRef = useRef(storedValue);
+  valueRef.current = storedValue;
+
   const setValue = useCallback((value: T | ((prev: T) => T)) => {
     try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      const prev = valueRef.current;
+      const valueToStore = value instanceof Function ? value(prev) : value;
+      valueRef.current = valueToStore;
       setStoredValue(valueToStore);
       window.sessionStorage.setItem(key, JSON.stringify(valueToStore));
     } catch (error) {
       console.warn(`Error setting sessionStorage key "${key}":`, error);
     }
-  }, [key, storedValue]);
+  }, [key]);
 
   return [storedValue, setValue];
 }

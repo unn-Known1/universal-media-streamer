@@ -66,6 +66,7 @@ export async function extractPlayableSources(url: string): Promise<ExtractionRes
     }
 
     const html = await response.text();
+    const thisPageUrl = response.url || url;
 
     // Extract title
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -183,10 +184,10 @@ export async function extractPlayableSources(url: string): Promise<ExtractionRes
       });
     }
 
-    // Convert found URLs to sources
+    // Convert found URLs to sources (resolving relative paths)
     sources.push(...Array.from(foundUrls).map(url => ({
-      url: cleanUrl(url),
-      type: detectMediaType(url),
+      url: cleanUrl(resolveUrl(url, thisPageUrl)),
+      type: detectMediaType(resolveUrl(url, thisPageUrl)),
       label: getLabelForUrl(url),
     })));
 
@@ -221,6 +222,18 @@ function isDirectPlayable(url: string): boolean {
          VIDEO_EXTENSIONS.some(ext => lowerUrl.includes(ext));
 }
 
+/**
+ * Resolve possibly-relative URLs against the page URL so sources such as
+ * "/media/video.mp4" become fully qualified playable URLs.
+ */
+function resolveUrl(maybeRelative: string, base: string): string {
+  try {
+    return new URL(maybeRelative, base).toString();
+  } catch {
+    return maybeRelative;
+  }
+}
+
 function detectMediaType(url: string): MediaType {
   const lowerUrl = url.toLowerCase();
 
@@ -229,6 +242,9 @@ function detectMediaType(url: string): MediaType {
   }
   if (lowerUrl.includes('vimeo.com')) {
     return 'vimeo';
+  }
+  if (lowerUrl.includes('twitch.tv')) {
+    return 'twitch';
   }
   if (lowerUrl.includes('drive.google.com')) {
     return 'google-drive';
@@ -249,11 +265,12 @@ function detectMediaType(url: string): MediaType {
 }
 
 function cleanUrl(url: string): string {
-  // Remove tracking parameters and clean up URL
+  // Normalize the URL but KEEP query parameters - streams often require
+  // auth tokens in the query string (e.g. signed HLS/DASH URLs).
   try {
     const urlObj = new URL(url);
-    // Keep only essential parameters
-    urlObj.search = '';
+    // Drop fragment only
+    urlObj.hash = '';
     return urlObj.toString();
   } catch {
     return url;
@@ -306,6 +323,8 @@ export function getMediaTypeIcon(type: MediaType): string {
     vimeo: '🎥',
     'google-drive': '📁',
     dropbox: '☁️',
+    iptv: '📺',
+    twitch: '🟣',
     unknown: '❓',
   };
   return icons[type];

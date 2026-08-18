@@ -6,14 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "dashjs": "^4.7.4",
     "framer-motion": "^11.0.8",
     "hls.js": "^1.5.7",
     "lucide-react": "^0.344.0",
-    "pnpm-store": "link:/tmp/pnpm-store",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "video.js": "^8.10.0"

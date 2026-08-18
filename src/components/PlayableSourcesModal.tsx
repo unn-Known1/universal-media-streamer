@@ -24,10 +24,11 @@ interface PlayableSourcesModalProps {
   isOpen: boolean;
   onClose: () => void;
   url: string;
+  initialTab?: 'sources' | 'cast';
   onSelectSource: (url: string) => void;
 }
 
-export function PlayableSourcesModal({ isOpen, onClose, url, onSelectSource }: PlayableSourcesModalProps) {
+export function PlayableSourcesModal({ isOpen, onClose, url, initialTab = 'sources', onSelectSource }: PlayableSourcesModalProps) {
   const { showToast } = usePlayer();
   const [isLoading, setIsLoading] = useState(false);
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
@@ -35,14 +36,18 @@ export function PlayableSourcesModal({ isOpen, onClose, url, onSelectSource }: P
   const [isSearchingDevices, setIsSearchingDevices] = useState(false);
   const [isCasting, setIsCasting] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<CastDevice | null>(null);
-  const [activeTab, setActiveTab] = useState<'sources' | 'cast'>('sources');
+  const [activeTab, setActiveTab] = useState<'sources' | 'cast'>(initialTab);
 
   useEffect(() => {
-    if (isOpen && url) {
-      extractSources();
-      initializeCast();
+    if (isOpen) {
+      setActiveTab(initialTab);
+      if (url) {
+        extractSources();
+        initializeCast();
+      }
     }
-  }, [isOpen, url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, url, initialTab]);
 
   const extractSources = async () => {
     setIsLoading(true);

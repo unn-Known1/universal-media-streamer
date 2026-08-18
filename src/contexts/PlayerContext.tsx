@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect, ReactNode } from 'react';
 import { PlayerState, MediaItem, SubtitleTrack, Toast, IPTVChannel, IPTVPlaylist } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { detectMediaType } from '../utils/mediaDetector';
@@ -20,6 +20,8 @@ interface PlayerContextType {
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
+  syncStateFromVideo: () => void;
+  updatePlayerState: (patch: Partial<PlayerState>) => void;
   seek: (time: number) => void;
   seekRelative: (delta: number) => void;
   setVolume: (volume: number) => void;
@@ -39,6 +41,7 @@ interface PlayerContextType {
   playNext: () => void;
   playPrevious: () => void;
   addToHistory: (item: MediaItem) => void;
+  removeFromHistory: (id: string) => void;
   clearHistory: () => void;
   addBookmark: (item: MediaItem) => void;
   removeBookmark: (id: string) => void;
@@ -108,9 +111,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying: true,
       currentTime: 0,
       duration: 0,
+      buffered: 0,
       isIPTV: false,
       currentPlaylist: undefined,
       currentChannelIndex: 0,
+      availableQualities: [],
+      quality: 'auto',
+      subtitles: [],
+      activeSubtitle: null,
+      abRepeat: { start: null, end: null },
+      isLooping: false,
     }));
 
     // Add to history
@@ -120,7 +130,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // IPTV specific: Load a channel
   const loadIPTVChannel = useCallback((channel: IPTVChannel, playlist?: IPTVPlaylist, index?: number) => {
     setCurrentPlaylist(playlist || null);
-    
+
     setPlayerState((prev) => ({
       ...prev,
       currentMedia: {
@@ -130,24 +140,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying: true,
       currentTime: 0,
       duration: 0,
+      buffered: 0,
       isIPTV: true,
       currentPlaylist: playlist,
       currentChannelIndex: index ?? 0,
+      availableQualities: [],
+      quality: 'auto',
+      subtitles: [],
+      activeSubtitle: null,
+      abRepeat: { start: null, end: null },
+      isLooping: false,
     }));
   }, []);
 
   const play = useCallback(() => {
-    if (videoRef.current) {
-      videoRef.current.play();
+    const video = videoRef.current;
+    if (!video) return;
+    const promise = video.play();
+    if (promise !== undefined) {
+      promise
+        .then(() => setPlayerState((prev) => ({ ...prev, isPlaying: true })))
+        .catch(() => setPlayerState((prev) => ({ ...prev, isPlaying: false })));
+    } else {
       setPlayerState((prev) => ({ ...prev, isPlaying: true }));
     }
   }, []);
 
   const pause = useCallback(() => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      setPlayerState((prev) => ({ ...prev, isPlaying: false }));
-    }
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    setPlayerState((prev) => ({ ...prev, isPlaying: false }));
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -158,14 +181,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [playerState.isPlaying, play, pause]);
 
+  // Update context state from a media element event (used by the Player).
+  const syncStateFromVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    setPlayerState((prev) => ({
+      ...prev,
+      currentTime: video.currentTime,
+      duration: video.duration || prev.duration,
+      buffered: video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : prev.buffered,
+      isPlaying: !video.paused && !video.ended,
+    }));
+  }, []);
+
+  const updatePlayerState = useCallback((patch: Partial<PlayerState>) => {
+    setPlayerState((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const seek = useCallback((time: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = Math.max(0, Math.min(time, playerState.duration));
-    }
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(time, video.duration || playerState.duration));
   }, [playerState.duration]);
 
   const seekRelative = useCallback((delta: number) => {
-    seek(playerState.currentTime + delta);
+    const video = videoRef.current;
+    if (!video) return;
+    seek((video.currentTime || playerState.currentTime) + delta);
   }, [playerState.currentTime, seek]);
 
   const setVolume = useCallback((volume: number) => {
@@ -195,12 +237,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!container) return;
 
     if (!document.fullscreenElement) {
-      container.requestFullscreen();
+      container.requestFullscreen?.();
       setPlayerState((prev) => ({ ...prev, isFullscreen: true }));
     } else {
       document.exitFullscreen();
       setPlayerState((prev) => ({ ...prev, isFullscreen: false }));
     }
+  }, []);
+
+  // Keep isFullscreen in sync with the browser's actual fullscreen state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setPlayerState((prev) => ({
+        ...prev,
+        isFullscreen: document.fullscreenElement !== null,
+      }));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
   const toggleTheaterMode = useCallback(() => {
@@ -260,42 +314,68 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPlaylist([]);
   }, [setPlaylist]);
 
-  const playNext = useCallback(() => {
-    if (playlist.length > 0 && playerState.currentMedia) {
-      const currentIndex = playlist.findIndex((item) => item.id === playerState.currentMedia?.id);
-      if (currentIndex < playlist.length - 1) {
-        const nextItem = playlist[currentIndex + 1];
-        loadMedia(nextItem.url, nextItem.title);
-      }
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, [setToasts]);
+
+  const showToast = useCallback((message: string, type: Toast['type'] = 'info', duration: number = 3000) => {
+    const id = generateId();
+    setToasts((prev) => [...prev, { id, message, type, duration }]);
+
+    if (duration > 0) {
+      setTimeout(() => {
+        dismissToast(id);
+      }, duration);
     }
-  }, [playlist, playerState.currentMedia, loadMedia]);
+  }, [setToasts, dismissToast]);
+
+  const playNext = useCallback(() => {
+    if (playlist.length === 0) return;
+    const currentUrl = playerState.currentMedia?.url;
+    const currentIndex = currentUrl
+      ? playlist.findIndex((item) => item.url === currentUrl)
+      : -1;
+    if (currentIndex < playlist.length - 1) {
+      const nextItem = playlist[currentIndex + 1];
+      loadMedia(nextItem.url, nextItem.title);
+      showToast(`Now playing: ${nextItem.title}`, 'info');
+    } else if (playlist.length > 0) {
+      // Wrap around to the first item
+      const first = playlist[0];
+      loadMedia(first.url, first.title);
+    }
+  }, [playlist, playerState.currentMedia, loadMedia, showToast]);
 
   const playPrevious = useCallback(() => {
-    if (playlist.length > 0 && playerState.currentMedia) {
-      const currentIndex = playlist.findIndex((item) => item.id === playerState.currentMedia?.id);
-      if (currentIndex > 0) {
-        const prevItem = playlist[currentIndex - 1];
-        loadMedia(prevItem.url, prevItem.title);
-      }
+    if (playlist.length === 0) return;
+    const currentUrl = playerState.currentMedia?.url;
+    const currentIndex = currentUrl
+      ? playlist.findIndex((item) => item.url === currentUrl)
+      : -1;
+    if (currentIndex > 0) {
+      const prevItem = playlist[currentIndex - 1];
+      loadMedia(prevItem.url, prevItem.title);
+    } else if (playlist.length > 0) {
+      // Wrap around to the last item
+      const last = playlist[playlist.length - 1];
+      loadMedia(last.url, last.title);
     }
   }, [playlist, playerState.currentMedia, loadMedia]);
 
-  // IPTV: Play next channel in playlist
+  // IPTV: Play next channel in playlist (wraps around)
   const playNextChannel = useCallback(() => {
-    if (playerState.isIPTV && currentPlaylist && playerState.currentChannelIndex < currentPlaylist.channels.length - 1) {
-      const nextIndex = playerState.currentChannelIndex + 1;
-      const nextChannel = currentPlaylist.channels[nextIndex];
-      loadIPTVChannel(nextChannel, currentPlaylist, nextIndex);
-    }
+    if (!playerState.isIPTV || !currentPlaylist || currentPlaylist.channels.length === 0) return;
+    const nextIndex = (playerState.currentChannelIndex + 1) % currentPlaylist.channels.length;
+    const nextChannel = currentPlaylist.channels[nextIndex];
+    loadIPTVChannel(nextChannel, currentPlaylist, nextIndex);
   }, [playerState.isIPTV, currentPlaylist, playerState.currentChannelIndex, loadIPTVChannel]);
 
-  // IPTV: Play previous channel in playlist
+  // IPTV: Play previous channel in playlist (wraps around)
   const playPreviousChannel = useCallback(() => {
-    if (playerState.isIPTV && currentPlaylist && playerState.currentChannelIndex > 0) {
-      const prevIndex = playerState.currentChannelIndex - 1;
-      const prevChannel = currentPlaylist.channels[prevIndex];
-      loadIPTVChannel(prevChannel, currentPlaylist, prevIndex);
-    }
+    if (!playerState.isIPTV || !currentPlaylist || currentPlaylist.channels.length === 0) return;
+    const prevIndex = (playerState.currentChannelIndex - 1 + currentPlaylist.channels.length) % currentPlaylist.channels.length;
+    const prevChannel = currentPlaylist.channels[prevIndex];
+    loadIPTVChannel(prevChannel, currentPlaylist, prevIndex);
   }, [playerState.isIPTV, currentPlaylist, playerState.currentChannelIndex, loadIPTVChannel]);
 
   const addToHistory = useCallback((item: MediaItem) => {
@@ -310,6 +390,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const clearHistory = useCallback(() => {
     setHistory([]);
+  }, [setHistory]);
+
+  const removeFromHistory = useCallback((id: string) => {
+    setHistory((prev) => prev.filter((item) => item.id !== id));
   }, [setHistory]);
 
   const addBookmark = useCallback((item: MediaItem) => {
@@ -349,21 +433,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIptvPlaylists([]);
   }, [setIptvPlaylists]);
 
-  const showToast = useCallback((message: string, type: Toast['type'] = 'info', duration: number = 3000) => {
-    const id = generateId();
-    setToasts((prev) => [...prev, { id, message, type, duration }]);
-
-    if (duration > 0) {
-      setTimeout(() => {
-        dismissToast(id);
-      }, duration);
-    }
-  }, []);
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  }, []);
-
   const value = useMemo(() => ({
     playerState,
     videoRef,
@@ -378,6 +447,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     play,
     pause,
     togglePlay,
+    syncStateFromVideo,
+    updatePlayerState,
     seek,
     seekRelative,
     setVolume,
@@ -397,6 +468,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playNext,
     playPrevious,
     addToHistory,
+    removeFromHistory,
     clearHistory,
     addBookmark,
     removeBookmark,
@@ -410,11 +482,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     dismissToast,
   }), [
     playerState, playlist, history, bookmarks, toasts, iptvPlaylists, currentPlaylist,
-    loadMedia, loadIPTVChannel, play, pause, togglePlay,
+    loadMedia, loadIPTVChannel, play, pause, togglePlay, syncStateFromVideo, updatePlayerState,
     seek, seekRelative, setVolume, toggleMute, setPlaybackRate, toggleFullscreen,
     toggleTheaterMode, togglePiP, setQuality, setSubtitle, toggleLoop, setABRepeat,
     clearABRepeat, addToPlaylist, removeFromPlaylist, clearPlaylist, playNext, playPrevious,
-    addToHistory, clearHistory, addBookmark, removeBookmark, clearBookmarks,
+    addToHistory, removeFromHistory, clearHistory, addBookmark, removeBookmark, clearBookmarks,
     addIPTVPlaylist, removeIPTVPlaylist, clearIPTVPlaylists, playNextChannel, playPreviousChannel,
     showToast, dismissToast
   ]);

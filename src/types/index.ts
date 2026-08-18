@@ -1,4 +1,4 @@
-export type MediaType = 'mp4' | 'webm' | 'hls' | 'dash' | 'youtube' | 'vimeo' | 'google-drive' | 'dropbox' | 'iptv' | 'unknown';
+export type MediaType = 'mp4' | 'webm' | 'hls' | 'dash' | 'youtube' | 'vimeo' | 'google-drive' | 'dropbox' | 'iptv' | 'twitch' | 'unknown';
 
 export interface MediaItem {
   id: string;
@@ -40,6 +40,7 @@ export interface IPTVPlaylist {
   channels: IPTVChannel[];
   addedAt: number;
   lastUsedAt?: number;
+  isMediaPlaylist?: boolean;
 }
 
 export interface PlayerState {
@@ -85,9 +86,18 @@ export interface Settings {
   captionBackground: string;
   reducedMotion: boolean;
   highContrast: boolean;
+  layoutDensity: 'compact' | 'default' | 'comfortable';
   // IPTV specific
   iptvLastPlaylist?: string;
   iptvRememberChannel: boolean;
+  // Twitch channels (persisted)
+  twitchChannels: TwitchChannel[];
+}
+
+export interface TwitchChannel {
+  channelName: string;
+  quality: 'source' | 'high' | 'medium' | 'low';
+  enabled: boolean;
 }
 
 export interface Toast {

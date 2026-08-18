@@ -1,8 +1,7 @@
 import { useEffect, useCallback } from 'react';
-import { MediaItem } from '../types';
 
 export function useMediaSession(
-  currentMedia: MediaItem | null,
+  title: string | null,
   isPlaying: boolean,
   currentTime: number,
   duration: number,
@@ -15,14 +14,12 @@ export function useMediaSession(
 
     const media = navigator.mediaSession;
 
-    if (currentMedia) {
+    if (title) {
       media.metadata = new MediaMetadata({
-        title: currentMedia.title || 'Unknown Title',
+        title,
         artist: 'Universal Media Streamer',
         album: 'Streaming',
-        artwork: currentMedia.thumbnail
-          ? [{ src: currentMedia.thumbnail, sizes: '512x512', type: 'image/png' }]
-          : [],
+        artwork: [],
       });
     }
 
@@ -35,7 +32,7 @@ export function useMediaSession(
         onSeek(details.seekTime);
       }
     });
-  }, [currentMedia, currentTime, duration, onPlay, onPause, onSeek]);
+  }, [title, currentTime, duration, onPlay, onPause, onSeek]);
 
   useEffect(() => {
     updateMediaSession();

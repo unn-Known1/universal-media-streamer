@@ -15,18 +15,16 @@ import {
   Tv,
   List,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayer } from '../contexts/PlayerContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { validateUrl, detectMediaType, getMediaTypeLabel, getMediaTypeColor } from '../utils/mediaDetector';
 import { PlayableSourcesModal } from './PlayableSourcesModal';
 import { IPTVChannelList, IPTVChannelListLoading } from './IPTVChannelList';
-import { loadIPTVPlaylist } from '../utils/iptvParser';
+import { loadIPTVPlaylist, parseM3U, looksLikeMediaPlaylist } from '../utils/iptvParser';
 import { IPTVChannel, IPTVPlaylist } from '../types';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 
 export function MediaInput() {
-  const { loadMedia, loadIPTVChannel, addBookmark, addToPlaylist, showToast } = usePlayer();
+  const { loadMedia, loadIPTVChannel, addBookmark, addToPlaylist, showToast, iptvPlaylists, addIPTVPlaylist, removeIPTVPlaylist, playerState } = usePlayer();
   const { settings, updateSettings } = useSettings();
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -34,12 +32,12 @@ export function MediaInput() {
   const [validation, setValidation] = useState<{ valid: boolean; message?: string }>({ valid: true });
   const [isDragging, setIsDragging] = useState(false);
   const [showSourcesModal, setShowSourcesModal] = useState(false);
+  const [sourcesModalTab, setSourcesModalTab] = useState<'sources' | 'cast'>('sources');
 
   // IPTV specific state
   const [showIPTVList, setShowIPTVList] = useState(false);
   const [currentPlaylist, setCurrentPlaylist] = useState<IPTVPlaylist | null>(null);
   const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
-  const [savedPlaylists, setSavedPlaylists] = useLocalStorage<IPTVPlaylist[]>('ums-iptv-playlists', []);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -64,6 +62,17 @@ export function MediaInput() {
     }
   };
 
+  const playMediaUrl = (mediaUrl: string, mediaTitle?: string) => {
+    setIsLoading(true);
+    setTimeout(() => {
+      loadMedia(mediaUrl.trim(), mediaTitle?.trim() || undefined);
+      setUrl('');
+      setTitle('');
+      setValidation({ valid: true });
+      setIsLoading(false);
+    }, 300);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -78,60 +87,51 @@ export function MediaInput() {
       return;
     }
 
-    // Check if URL is IPTV playlist
     const mediaType = detectMediaType(url);
 
-    if (mediaType === 'iptv') {
-      await loadIPTVPlaylistFromUrl(url);
-      return;
+    // IPTV playlists end in .m3u8, which is also the HLS extension.
+    // Fetch the content to decide: media playlists play directly,
+    // channel playlists open the IPTV channel list.
+    if (mediaType === 'iptv' || mediaType === 'hls') {
+      const handled = await handlePlaylistOrStream(url);
+      if (handled) return;
     }
 
     // If it's not a direct playable source, show the sources modal
-    if (mediaType === 'unknown' || (!url.includes('.mp4') && !url.includes('.webm') && !url.includes('.m3u8') && !url.includes('.mpd') && !url.includes('youtube') && !url.includes('youtu.be') && !url.includes('vimeo'))) {
+    if (mediaType === 'unknown' || (!url.includes('.mp4') && !url.includes('.webm') && !url.includes('.m3u8') && !url.includes('.mpd') && !url.includes('youtube') && !url.includes('youtu.be') && !url.includes('vimeo') && !url.includes('twitch'))) {
       setShowSourcesModal(true);
       return;
     }
 
-    setIsLoading(true);
-
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      loadMedia(url.trim(), title.trim() || undefined);
-      setUrl('');
-      setTitle('');
-      setValidation({ valid: true });
-    } catch (error) {
-      showToast('Failed to load media', 'error');
-    } finally {
-      setIsLoading(false);
-    }
+    playMediaUrl(url, title);
   };
 
-  const loadIPTVPlaylistFromUrl = async (playlistUrl: string) => {
+  const handlePlaylistOrStream = async (playlistUrl: string): Promise<boolean> => {
     setIsLoading(true);
     try {
       const playlist = await loadIPTVPlaylist(playlistUrl);
-      setCurrentPlaylist(playlist);
-
-      // Save to recent playlists
-      setSavedPlaylists((prev) => {
-        const filtered = prev.filter(p => p.url !== playlistUrl);
-        return [playlist, ...filtered].slice(0, 10);
-      });
-
-      // Update settings
-      updateSettings({ iptvLastPlaylist: playlistUrl });
-
-      // Show channel list
-      setShowIPTVList(true);
-
-      if (playlist.channels.length > 0) {
-        showToast(`Loaded ${playlist.channels.length} channels from ${playlist.name}`, 'success');
-      } else {
-        showToast('No channels found in playlist', 'warning');
+      if (playlist.isMediaPlaylist || playlist.channels.length === 0) {
+        // It's a single media stream (HLS), not an IPTV channel list
+        loadMedia(playlistUrl, title.trim() || undefined);
+        setUrl('');
+        setTitle('');
+        setValidation({ valid: true });
+        return true;
       }
+      setCurrentPlaylist(playlist);
+      addIPTVPlaylist(playlist);
+      updateSettings({ iptvLastPlaylist: playlistUrl });
+      setShowIPTVList(true);
+      showToast(`Loaded ${playlist.channels.length} channels from ${playlist.name}`, 'success');
+      return true;
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to load IPTV playlist', 'error');
+      // If it fails to parse as a playlist, try playing it directly as HLS
+      showToast('Not an IPTV playlist, attempting direct playback', 'info');
+      loadMedia(playlistUrl, title.trim() || undefined);
+      setUrl('');
+      setTitle('');
+      setValidation({ valid: true });
+      return true;
     } finally {
       setIsLoading(false);
     }
@@ -142,6 +142,16 @@ export function MediaInput() {
       showToast('Please enter a URL first', 'error');
       return;
     }
+    setSourcesModalTab('sources');
+    setShowSourcesModal(true);
+  };
+
+  const handleCastDevices = () => {
+    if (!url.trim()) {
+      showToast('Please enter a URL first', 'error');
+      return;
+    }
+    setSourcesModalTab('cast');
     setShowSourcesModal(true);
   };
 
@@ -169,10 +179,37 @@ export function MediaInput() {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-        const blobUrl = URL.createObjectURL(file);
-        loadMedia(blobUrl, file.name);
-        showToast(`Loaded: ${file.name}`, 'success');
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/') || file.name.match(/\.(m3u8?|mpd)$/i)) {
+        if (file.name.match(/\.(m3u8?)$/i)) {
+          // Local IPTV/HLS playlist
+          const reader = new FileReader();
+          reader.onload = () => {
+            const content = reader.result as string;
+            const channels = parseM3U(content);
+            if (channels.length > 0 && !looksLikeMediaPlaylist(content)) {
+              const playlist: IPTVPlaylist = {
+                id: `local-${Date.now()}`,
+                name: file.name.replace(/\.(m3u8?)$/i, ''),
+                url: URL.createObjectURL(file),
+                channels,
+                addedAt: Date.now(),
+              };
+              setCurrentPlaylist(playlist);
+              addIPTVPlaylist(playlist);
+              setShowIPTVList(true);
+              showToast(`Loaded ${channels.length} channels from ${file.name}`, 'success');
+            } else {
+              const blobUrl = URL.createObjectURL(file);
+              loadMedia(blobUrl, file.name);
+              showToast(`Playing HLS stream: ${file.name}`, 'success');
+            }
+          };
+          reader.readAsText(file);
+        } else {
+          const blobUrl = URL.createObjectURL(file);
+          loadMedia(blobUrl, file.name);
+          showToast(`Loaded: ${file.name}`, 'success');
+        }
       } else {
         showToast('Please drop a video or audio file', 'error');
       }
@@ -183,21 +220,56 @@ export function MediaInput() {
       const result = validateUrl(text);
       if (result.valid) {
         setUrl(text);
-        handleSubmit(new Event('submit') as any);
+        setTitle('');
+        setValidation({ valid: true, message: `Detected: ${getMediaTypeLabel(detectMediaType(text))}` });
+        handleSubmitFromText(text);
       }
     }
-  }, [loadMedia, showToast]);
+  }, [addIPTVPlaylist, loadMedia, showToast]);
+
+  const handleSubmitFromText = async (text: string) => {
+    const mediaType = detectMediaType(text);
+    if (mediaType === 'iptv' || mediaType === 'hls') {
+      await handlePlaylistOrStream(text);
+      return;
+    }
+    playMediaUrl(text);
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+      if (file.name.match(/\.(m3u8?)$/i)) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = reader.result as string;
+          const channels = parseM3U(content);
+          if (channels.length > 0 && !looksLikeMediaPlaylist(content)) {
+            const playlist: IPTVPlaylist = {
+              id: `local-${Date.now()}`,
+              name: file.name.replace(/\.(m3u8?)$/i, ''),
+              url: URL.createObjectURL(file),
+              channels,
+              addedAt: Date.now(),
+            };
+            setCurrentPlaylist(playlist);
+            addIPTVPlaylist(playlist);
+            setShowIPTVList(true);
+            showToast(`Loaded ${channels.length} channels from ${file.name}`, 'success');
+          } else {
+            const blobUrl = URL.createObjectURL(file);
+            loadMedia(blobUrl, file.name);
+            showToast(`Playing HLS stream: ${file.name}`, 'success');
+          }
+        };
+        reader.readAsText(file);
+      } else if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
         const blobUrl = URL.createObjectURL(file);
         loadMedia(blobUrl, file.name);
         showToast(`Loaded: ${file.name}`, 'success');
       } else {
-        showToast('Please select a video or audio file', 'error');
+        showToast('Please select a video, audio, or M3U/M3U8 file', 'error');
       }
     }
   };
@@ -207,7 +279,6 @@ export function MediaInput() {
       const text = await navigator.clipboard.readText();
       if (text) {
         setUrl(text);
-        // Trigger validation
         const result = validateUrl(text);
         if (result.valid) {
           const type = detectMediaType(text);
@@ -241,38 +312,33 @@ export function MediaInput() {
     }
   };
 
-  const handlePreviousIPTVChannel = () => {
-    if (currentPlaylist && currentPlaylist.channels.length > 0) {
-      const currentIndex = currentPlaylist.channels.findIndex(ch => ch.id === currentPlaylist.channels[0]?.id);
-      if (currentIndex > 0) {
-        const prevChannel = currentPlaylist.channels[currentIndex - 1];
-        loadIPTVChannel(prevChannel, currentPlaylist, currentIndex - 1);
-      }
-    }
-  };
-
-  const handleNextIPTVChannel = () => {
-    if (currentPlaylist && currentPlaylist.channels.length > 0) {
-      const currentIndex = currentPlaylist.channels.findIndex(ch => ch.id === currentPlaylist.channels[0]?.id);
-      if (currentIndex < currentPlaylist.channels.length - 1) {
-        const nextChannel = currentPlaylist.channels[currentIndex + 1];
-        loadIPTVChannel(nextChannel, currentPlaylist, currentIndex + 1);
-      }
-    }
-  };
-
-  // Load saved playlist
-  const handleLoadSavedPlaylist = async (playlist: IPTVPlaylist) => {
+  const loadSavedPlaylist = async (playlist: IPTVPlaylist) => {
     setIsLoading(true);
     try {
+      if (playlist.url.startsWith('blob:')) {
+        // Locally imported playlist - reuse cached content
+        const refreshed = await loadIPTVPlaylist(playlist.url).catch(() => null);
+        if (refreshed && !refreshed.isMediaPlaylist) {
+          setCurrentPlaylist(refreshed);
+          setShowIPTVList(true);
+          showToast(`Loaded ${refreshed.channels.length} channels`, 'success');
+          return;
+        }
+        // Fall back to the cached copy
+        setCurrentPlaylist(playlist);
+        setShowIPTVList(true);
+        showToast(`Loaded ${playlist.channels.length} channels`, 'success');
+        return;
+      }
       const refreshed = await loadIPTVPlaylist(playlist.url);
       setCurrentPlaylist(refreshed);
+      addIPTVPlaylist(refreshed);
       setShowIPTVList(true);
       showToast(`Loaded ${refreshed.channels.length} channels`, 'success');
     } catch (error) {
       showToast('Failed to load playlist', 'error');
-      // Remove invalid playlist
-      setSavedPlaylists((prev) => prev.filter(p => p.id !== playlist.id));
+      // Remove invalid playlist from saved playlists
+      removeIPTVPlaylist(playlist.id);
     } finally {
       setIsLoading(false);
     }
@@ -280,6 +346,7 @@ export function MediaInput() {
 
   const mediaType = url.trim() ? detectMediaType(url) : null;
   const isIPTV = mediaType === 'iptv';
+  const currentChannel = playerState.isIPTV ? (playerState.currentMedia as IPTVChannel) : null;
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -287,6 +354,7 @@ export function MediaInput() {
       {currentPlaylist && (
         <IPTVChannelList
           playlist={currentPlaylist}
+          currentChannel={currentChannel}
           isOpen={showIPTVList}
           onClose={() => setShowIPTVList(false)}
           onSelectChannel={handleSelectIPTVChannel}
@@ -304,6 +372,7 @@ export function MediaInput() {
         isOpen={showSourcesModal}
         onClose={() => setShowSourcesModal(false)}
         url={url}
+        initialTab={sourcesModalTab}
         onSelectSource={handleSourceSelect}
       />
 
@@ -319,7 +388,7 @@ export function MediaInput() {
             type="text"
             value={url}
             onChange={handleUrlChange}
-            placeholder="Paste video URL, HLS/DASH stream, YouTube, Vimeo, or M3U/M3U8 IPTV playlist..."
+            placeholder="Paste video URL, HLS/DASH stream, YouTube, Vimeo, Twitch, or M3U/M3U8 IPTV playlist..."
             className={`w-full h-14 pl-12 pr-48 rounded-2xl bg-dark-700/50 border-2 transition-all outline-none ${
               validation.valid
                 ? 'border-white/10 focus:border-primary-500/50 focus:ring-4 focus:ring-primary-500/10'
@@ -387,11 +456,11 @@ export function MediaInput() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <button
             type="submit"
             disabled={isLoading || !url.trim() || !validation.valid}
-            className="flex-1 h-12 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25"
+            className="flex-1 h-12 min-w-[120px] rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25"
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -429,7 +498,7 @@ export function MediaInput() {
           {/* Cast Button */}
           <button
             type="button"
-            onClick={handleScanForSources}
+            onClick={handleCastDevices}
             disabled={!url.trim()}
             className="h-12 px-4 rounded-xl bg-dark-700/50 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Cast to Device"
@@ -482,7 +551,7 @@ export function MediaInput() {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="h-12 px-4 rounded-xl bg-dark-700/50 hover:bg-white/10 transition-colors"
-            title="Upload File"
+            title="Upload File or Playlist"
           >
             <Upload className="w-5 h-5" />
           </button>
@@ -493,23 +562,23 @@ export function MediaInput() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/*,audio/*"
+        accept="video/*,audio/*,.m3u,.m3u8"
         onChange={handleFileSelect}
         className="hidden"
       />
 
       {/* Saved IPTV Playlists */}
-      {savedPlaylists.length > 0 && (
+      {iptvPlaylists.length > 0 && (
         <div className="mt-6">
           <p className="text-sm text-slate-500 mb-3 flex items-center gap-2">
             <Tv className="w-4 h-4" />
             Recent IPTV Playlists
           </p>
           <div className="flex gap-2 overflow-x-auto pb-2">
-            {savedPlaylists.slice(0, 5).map((playlist) => (
+            {iptvPlaylists.slice(0, 5).map((playlist) => (
               <button
                 key={playlist.id}
-                onClick={() => handleLoadSavedPlaylist(playlist)}
+                onClick={() => loadSavedPlaylist(playlist)}
                 className="flex-shrink-0 px-4 py-2 rounded-xl bg-dark-700/50 hover:bg-white/10 border border-white/5 hover:border-violet-500/30 transition-colors text-sm"
               >
                 <span className="font-medium">{playlist.name}</span>
@@ -542,7 +611,7 @@ export function MediaInput() {
               {isDragging ? 'Drop your file here' : 'Drag & drop a file or URL'}
             </p>
             <p className="text-sm text-slate-500 mt-1">
-              Supports MP4, WebM, MKV, HLS, DASH, YouTube, Vimeo, and IPTV M3U/M3U8 playlists
+              Supports MP4, WebM, MKV, HLS, DASH, YouTube, Vimeo, Twitch, and IPTV M3U/M3U8 playlists
             </p>
           </div>
         </div>
@@ -558,6 +627,7 @@ export function MediaInput() {
             'DASH streams (.mpd)',
             'YouTube',
             'Vimeo',
+            'Twitch',
             'Google Drive',
             'Dropbox',
             'IPTV M3U/M3U8',

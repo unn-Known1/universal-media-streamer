@@ -29,19 +29,26 @@ export function Header({ onToggleSidebar, onOpenSettings }: HeaderProps) {
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim()) {
+      const lower = query.toLowerCase();
+      const seen = new Set<string>();
       const results = [
         ...history.filter(
           (h) =>
-            h.title.toLowerCase().includes(query.toLowerCase()) ||
-            h.url.toLowerCase().includes(query.toLowerCase())
+            h.title.toLowerCase().includes(lower) ||
+            h.url.toLowerCase().includes(lower)
         ),
         ...bookmarks.filter(
           (b) =>
-            b.title.toLowerCase().includes(query.toLowerCase()) ||
-            b.url.toLowerCase().includes(query.toLowerCase())
+            b.title.toLowerCase().includes(lower) ||
+            b.url.toLowerCase().includes(lower)
         ),
       ];
-      setSearchResults(results.slice(0, 10));
+      const unique = results.filter((r) => {
+        if (seen.has(r.url)) return false;
+        seen.add(r.url);
+        return true;
+      });
+      setSearchResults(unique.slice(0, 10));
       setShowSearch(true);
     } else {
       setSearchResults([]);
@@ -82,11 +89,11 @@ export function Header({ onToggleSidebar, onOpenSettings }: HeaderProps) {
     system: <Monitor className="w-5 h-5" />,
   }[settings.theme];
 
-  const nextTheme = {
+  const nextTheme: 'dark' | 'light' | 'system' = ({
     dark: 'light',
     light: 'system',
     system: 'dark',
-  }[settings.theme];
+  } as const)[settings.theme];
 
   return (
     <header className="h-16 bg-dark-800/80 backdrop-blur-xl border-b border-white/5 flex items-center px-4 gap-4 sticky top-0 z-50">

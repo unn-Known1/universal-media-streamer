@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { X, Sun, Moon, Monitor, Palette, Keyboard, Info, Play, Subtitles, Eye, Sparkles } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Palette, Keyboard, Info, Play, Subtitles, RotateCcw, Tv } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSettings } from '../contexts/SettingsContext';
-import { KEYBOARD_SHORTCUTS, PLAYBACK_RATES } from '../utils/constants';
+import { usePlayer } from '../contexts/PlayerContext';
+import { KEYBOARD_SHORTCUTS, PLAYBACK_RATES, DEFAULT_SETTINGS } from '../utils/constants';
+import { TwitchChannel } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -11,7 +13,7 @@ interface SettingsModalProps {
   onShowShortcuts: () => void;
 }
 
-type TabType = 'appearance' | 'playback' | 'subtitles' | 'shortcuts' | 'about' | 'streaming';
+type TabType = 'appearance' | 'playback' | 'subtitles' | 'shortcuts' | 'streaming' | 'about';
 
 const ACCENT_COLORS = [
   '#6366f1', // Indigo
@@ -26,18 +28,19 @@ const ACCENT_COLORS = [
   '#3b82f6', // Blue
 ];
 
-// Twitch channel settings
-interface TwitchChannel {
-  channelName: string;
-  quality: 'source' | 'high' | 'medium' | 'low';
-  enabled: boolean;
-}
+const CAPTION_BACKGROUNDS = [
+  { label: 'Black', value: 'rgba(0, 0, 0, 0.75)' },
+  { label: 'Darker', value: 'rgba(0, 0, 0, 0.95)' },
+  { label: 'White', value: 'rgba(255, 255, 255, 0.75)' },
+  { label: 'None', value: 'transparent' },
+];
 
 export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts }: SettingsModalProps) {
-  const { settings, setTheme, setAccentColor, updateSettings } = useSettings();
+  const { settings, setTheme, setAccentColor, updateSettings, resetSettings } = useSettings();
+  const { loadMedia, showToast } = usePlayer();
   const [activeTab, setActiveTab] = useState<TabType>('appearance');
-  const [twitchChannels, setTwitchChannels] = useState<TwitchChannel[]>([]);
   const [newTwitchChannel, setNewTwitchChannel] = useState('');
+  const [confirmReset, setConfirmReset] = useState(false);
 
   React.useEffect(() => {
     if (showShortcuts) {
@@ -53,7 +56,7 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
     { id: 'playback' as const, label: 'Playback', icon: Play },
     { id: 'subtitles' as const, label: 'Subtitles', icon: Subtitles },
     { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
-    { id: 'streaming' as const, label: 'Streaming', icon: Sparkles },
+    { id: 'streaming' as const, label: 'Streaming', icon: Tv },
     { id: 'about' as const, label: 'About', icon: Info },
   ];
 
@@ -84,6 +87,34 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
     '?': 'Show shortcuts',
   };
 
+  const updateTwitchChannel = (index: number, patch: Partial<TwitchChannel>) => {
+    const updated = [...settings.twitchChannels];
+    updated[index] = { ...updated[index], ...patch };
+    updateSettings({ twitchChannels: updated });
+  };
+
+  const addTwitchChannel = (name: string) => {
+    const trimmed = name.trim().toLowerCase().replace(/^@/, '');
+    if (!trimmed) return;
+    if (settings.twitchChannels.some((ch) => ch.channelName === trimmed)) {
+      showToast('Channel already added', 'info');
+      return;
+    }
+    updateSettings({
+      twitchChannels: [
+        ...settings.twitchChannels,
+        { channelName: trimmed, quality: 'source', enabled: true },
+      ],
+    });
+    setNewTwitchChannel('');
+  };
+
+  const playTwitchChannel = (channel: TwitchChannel) => {
+    if (!channel.enabled) return;
+    loadMedia(`https://www.twitch.tv/${channel.channelName}`, `${channel.channelName} (Twitch)`);
+    showToast(`Loading twitch.tv/${channel.channelName}`, 'info');
+  };
+
   return (
     <AnimatePresence>
       <motion.div
@@ -104,12 +135,36 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
             <h2 className="text-lg font-semibold">Settings</h2>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (confirmReset) {
+                    resetSettings();
+                    setConfirmReset(false);
+                    showToast('Settings reset to defaults', 'success');
+                  } else {
+                    setConfirmReset(true);
+                    setTimeout(() => setConfirmReset(false), 3000);
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                  confirmReset
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-dark-700/50 hover:bg-white/10 text-slate-400'
+                }`}
+                title="Reset settings"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                {confirmReset ? 'Confirm?' : 'Reset'}
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                aria-label="Close settings"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}
@@ -173,6 +228,7 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                             settings.accentColor === color ? 'ring-2 ring-white ring-offset-2 ring-offset-dark-800' : ''
                           }`}
                           style={{ backgroundColor: color }}
+                          aria-label={`Set accent color ${color}`}
                         />
                       ))}
                     </div>
@@ -182,11 +238,15 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                   <div>
                     <label className="block text-sm font-medium mb-3">Layout Density</label>
                     <div className="flex gap-2">
-                      {['Compact', 'Default', 'Comfortable'].map((option, i) => (
+                      {(['compact', 'default', 'comfortable'] as const).map((option) => (
                         <button
                           key={option}
-                          onClick={() => updateSettings({})}
-                          className="flex-1 px-4 py-2 rounded-lg border border-white/10 hover:border-white/20 transition-colors text-sm"
+                          onClick={() => updateSettings({ layoutDensity: option })}
+                          className={`flex-1 px-4 py-2 rounded-lg border transition-colors text-sm capitalize ${
+                            settings.layoutDensity === option
+                              ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                              : 'border-white/10 hover:border-white/20 text-slate-400'
+                          }`}
                         >
                           {option}
                         </button>
@@ -255,12 +315,13 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                     <input
                       type="range"
                       min="0"
-                      max="1"
-                      step="0.1"
+                      max="2"
+                      step="0.05"
                       value={settings.defaultVolume}
                       onChange={(e) => updateSettings({ defaultVolume: parseFloat(e.target.value) })}
                       className="w-full accent-primary-500"
                     />
+                    <p className="text-xs text-slate-500 mt-1">Up to 200% volume boost</p>
                   </div>
 
                   {/* Auto-play */}
@@ -276,15 +337,68 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                       className="w-5 h-5 rounded accent-primary-500"
                     />
                   </label>
+
+                  {/* IPTV: remember last channel */}
+                  <label className="flex items-center justify-between p-4 rounded-xl bg-dark-700/50 cursor-pointer">
+                    <div>
+                      <p className="font-medium">Remember Last IPTV Channel</p>
+                      <p className="text-xs text-slate-400">Resume the last watched channel when opening a playlist</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.iptvRememberChannel}
+                      onChange={() => updateSettings({ iptvRememberChannel: !settings.iptvRememberChannel })}
+                      className="w-5 h-5 rounded accent-primary-500"
+                    />
+                  </label>
                 </div>
               )}
 
               {activeTab === 'subtitles' && (
                 <div className="space-y-6">
-                  <div className="p-4 rounded-xl bg-dark-700/50 text-center">
-                    <Subtitles className="w-12 h-12 mx-auto mb-3 text-slate-400" />
-                    <p className="text-slate-400">Subtitle customization will appear here</p>
-                    <p className="text-sm text-slate-500 mt-1">Coming in a future update</p>
+                  <div>
+                    <label className="block text-sm font-medium mb-3">Caption Font Size</label>
+                    <div className="flex gap-2">
+                      {(['small', 'medium', 'large'] as const).map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => updateSettings({ captionFontSize: size })}
+                          className={`flex-1 px-4 py-2 rounded-lg border transition-colors text-sm capitalize ${
+                            settings.captionFontSize === size
+                              ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                              : 'border-white/10 hover:border-white/20 text-slate-400'
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-3">Caption Background</label>
+                    <div className="flex flex-wrap gap-2">
+                      {CAPTION_BACKGROUNDS.map((bg) => (
+                        <button
+                          key={bg.label}
+                          onClick={() => updateSettings({ captionBackground: bg.value })}
+                          className={`px-4 py-2 rounded-lg border transition-colors text-sm ${
+                            settings.captionBackground === bg.value
+                              ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                              : 'border-white/10 hover:border-white/20 text-slate-400'
+                          }`}
+                        >
+                          {bg.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-dark-700/50">
+                    <p className="text-sm text-slate-400">
+                      Captions are shown automatically when a stream provides subtitle or caption tracks.
+                      Toggle them with the subtitles button in the player or the <kbd className="px-2 py-0.5 rounded bg-dark-600 text-xs">C</kbd> key.
+                    </p>
                   </div>
                 </div>
               )}
@@ -331,27 +445,14 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                       className="flex-1 px-4 py-2 rounded-lg bg-dark-700 border border-white/10 focus:border-primary-500 outline-none"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && newTwitchChannel.trim()) {
-                          setTwitchChannels([...twitchChannels, {
-                            channelName: newTwitchChannel.trim().toLowerCase(),
-                            quality: 'source',
-                            enabled: true
-                          }]);
-                          setNewTwitchChannel('');
+                          addTwitchChannel(newTwitchChannel);
                         }
                       }}
                     />
                     <button
-                      onClick={() => {
-                        if (newTwitchChannel.trim()) {
-                          setTwitchChannels([...twitchChannels, {
-                            channelName: newTwitchChannel.trim().toLowerCase(),
-                            quality: 'source',
-                            enabled: true
-                          }]);
-                          setNewTwitchChannel('');
-                        }
-                      }}
-                      className="px-4 py-2 bg-primary-500 hover:bg-primary-600 rounded-lg transition-colors"
+                      onClick={() => addTwitchChannel(newTwitchChannel)}
+                      disabled={!newTwitchChannel.trim()}
+                      className="px-4 py-2 bg-primary-500 hover:bg-primary-600 disabled:opacity-50 rounded-lg transition-colors"
                     >
                       Add Channel
                     </button>
@@ -359,26 +460,22 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
 
                   {/* Channel List */}
                   <div className="space-y-2">
-                    {twitchChannels.length === 0 ? (
+                    {settings.twitchChannels.length === 0 ? (
                       <div className="p-4 rounded-xl bg-dark-700/50 text-center">
                         <p className="text-slate-400">No channels added yet</p>
                         <p className="text-sm text-slate-500 mt-1">Add a Twitch channel above to get started</p>
                       </div>
                     ) : (
-                      twitchChannels.map((channel, index) => (
+                      settings.twitchChannels.map((channel, index) => (
                         <div
-                          key={index}
+                          key={`${channel.channelName}-${index}`}
                           className="flex items-center justify-between p-3 rounded-lg bg-dark-700/50 border border-white/5"
                         >
                           <div className="flex items-center gap-3">
                             <input
                               type="checkbox"
                               checked={channel.enabled}
-                              onChange={() => {
-                                const updated = [...twitchChannels];
-                                updated[index].enabled = !updated[index].enabled;
-                                setTwitchChannels(updated);
-                              }}
+                              onChange={() => updateTwitchChannel(index, { enabled: !channel.enabled })}
                               className="w-4 h-4 rounded accent-primary-500"
                             />
                             <div>
@@ -389,11 +486,7 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                           <div className="flex items-center gap-2">
                             <select
                               value={channel.quality}
-                              onChange={(e) => {
-                                const updated = [...twitchChannels];
-                                updated[index].quality = e.target.value as TwitchChannel['quality'];
-                                setTwitchChannels(updated);
-                              }}
+                              onChange={(e) => updateTwitchChannel(index, { quality: e.target.value as TwitchChannel['quality'] })}
                               className="px-2 py-1 rounded bg-dark-600 text-sm border border-white/10"
                             >
                               <option value="source">Source</option>
@@ -402,7 +495,17 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                               <option value="low">Low</option>
                             </select>
                             <button
-                              onClick={() => setTwitchChannels(twitchChannels.filter((_, i) => i !== index))}
+                              onClick={() => playTwitchChannel(channel)}
+                              disabled={!channel.enabled}
+                              className="p-2 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition-colors disabled:opacity-30"
+                              title={`Play ${channel.channelName}`}
+                            >
+                              <Play className="w-4 h-4 fill-current" />
+                            </button>
+                            <button
+                              onClick={() => updateSettings({
+                                twitchChannels: settings.twitchChannels.filter((_, i) => i !== index),
+                              })}
                               className="p-2 text-red-400 hover:bg-red-400/20 rounded-lg transition-colors"
                             >
                               <X className="w-4 h-4" />
@@ -417,10 +520,10 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                   <div className="p-4 rounded-xl bg-dark-700/50">
                     <h4 className="font-medium mb-2">How Twitch Streaming Works</h4>
                     <ul className="text-sm text-slate-400 space-y-2">
-                      <li>• Streams are played using the HLS protocol via Twitch's player API</li>
+                      <li>• Channels are embedded in the player using Twitch's official player</li>
                       <li>• Enter a channel name to add it to your streaming list</li>
-                      <li>• Click on a channel to switch the player to that stream</li>
-                      <li>• Quality settings control the stream resolution preference</li>
+                      <li>• Click the play button on a channel to start watching</li>
+                      <li>• Your channel list is saved in your browser settings</li>
                     </ul>
                   </div>
                 </div>
@@ -437,15 +540,25 @@ export function SettingsModal({ isOpen, onClose, showShortcuts, onShowShortcuts 
                   </div>
                   <p className="text-sm text-slate-400 max-w-md mx-auto">
                     A powerful, feature-rich media player that supports all video formats,
-                    including HLS, DASH, YouTube, Vimeo, and more.
+                    including HLS, DASH, YouTube, Vimeo, Twitch, and more.
                   </p>
                   <div className="flex justify-center gap-2 text-xs text-slate-500">
                     <span>Built with React</span>
                     <span>•</span>
-                    <span>Video.js</span>
-                    <span>•</span>
                     <span>HLS.js</span>
+                    <span>•</span>
+                    <span>DASH.js</span>
                   </div>
+                  <button
+                    onClick={() => {
+                      resetSettings();
+                      showToast('Settings reset to defaults', 'success');
+                    }}
+                    className="mx-auto flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700/50 hover:bg-white/10 transition-colors text-sm text-slate-400"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Reset all settings
+                  </button>
                 </div>
               )}
             </div>

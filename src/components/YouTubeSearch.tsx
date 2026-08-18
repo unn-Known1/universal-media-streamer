@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Search, Play, Loader2, ExternalLink, Youtube, AlertCircle, Clock, Eye } from 'lucide-react';
 import { usePlayer } from '../contexts/PlayerContext';
+import { INVIDIOUS_INSTANCES } from '../utils/constants';
 
 interface VideoResult {
   videoId: string;
@@ -10,6 +11,67 @@ interface VideoResult {
   duration: string;
   viewCount: string;
   publishedTime: string;
+}
+
+interface InvidiousVideo {
+  videoId: string;
+  title: string;
+  author: string;
+  videoThumbnails?: { url: string; quality: string }[];
+  lengthSeconds?: number;
+  viewCount?: number;
+  publishedText?: string;
+}
+
+// Search via public Invidious API instances (CORS-friendly). Falls back
+// through the list until one responds.
+async function searchInvidious(query: string): Promise<InvidiousVideo[]> {
+  const url = `/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(`${instance}${url}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' },
+      });
+      clearTimeout(timeout);
+      if (!response.ok) continue;
+      const data: InvidiousVideo[] = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    } catch {
+      // Try the next instance
+    }
+  }
+  return [];
+}
+
+function formatViewCount(count?: number): string {
+  if (!count) return '';
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M views`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K views`;
+  return `${count} views`;
+}
+
+function formatLength(seconds?: number): string {
+  if (!seconds) return '';
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function bestThumbnail(video: InvidiousVideo): string {
+  const thumbs = video.videoThumbnails || [];
+  const preferred = ['medium', 'sddefault', 'high', 'hqdefault', 'default'];
+  for (const quality of preferred) {
+    const match = thumbs.find((t) => t.quality === quality);
+    if (match) return match.url;
+  }
+  return thumbs[0]?.url || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`;
 }
 
 export function YouTubeSearch() {
@@ -37,7 +99,7 @@ export function YouTubeSearch() {
     return null;
   };
 
-  // Fetch video info from YouTube oEmbed API
+  // Fetch video info from YouTube oEmbed API (single video)
   const fetchVideoInfo = async (videoId: string): Promise<VideoResult> => {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
     const response = await fetch(oembedUrl);
@@ -54,93 +116,45 @@ export function YouTubeSearch() {
     };
   };
 
-  // Search using YouTube's autocomplete/suggest API with JSONP
   const searchYouTube = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) return;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
 
     setIsLoading(true);
     setError(null);
     setResults([]);
 
     try {
-      // Check if it's a URL first
-      const videoId = extractVideoId(searchQuery);
+      // Check if it's a URL / video ID first
+      const videoId = extractVideoId(trimmed);
       if (videoId) {
         const info = await fetchVideoInfo(videoId);
         setResults([info]);
         return;
       }
 
-      // Search using Google search API (no CORS issues)
-      const response = await fetch(
-        `https://www.google.com/search?q=${encodeURIComponent(searchQuery + ' site:youtube.com')}&num=10&format=json`
-      ).catch(() => null);
-
-      // Fallback: Use YouTube's suggestions JSONP endpoint
-      const suggestionUrl = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${encodeURIComponent(searchQuery)}&callback=?`;
-
-      // Create a JSONP request manually
-      const jsonpResults = await new Promise<any>((resolve, reject) => {
-        const callbackName = 'ytSearchCallback';
-        const script = document.createElement('script');
-        script.src = suggestionUrl.replace('callback=?', `callback=${callbackName}`);
-
-        (window as any)[callbackName] = (data: any) => {
-          delete (window as any)[callbackName];
-          document.body.removeChild(script);
-          resolve(data);
-        };
-
-        script.onerror = () => {
-          delete (window as any)[callbackName];
-          document.body.removeChild(script);
-          reject(new Error('JSONP failed'));
-        };
-
-        document.body.appendChild(script);
-
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          if ((window as any)[callbackName]) {
-            delete (window as any)[callbackName];
-            document.body.removeChild(script);
-            reject(new Error('Timeout'));
-          }
-        }, 5000);
-      });
-
-      // Parse JSONP results and get suggestions
-      const suggestions: string[] = jsonpResults[1] || [];
-
-      if (suggestions.length > 0) {
-        // For each suggestion, we'll show it as a clickable option
-        // The user can then use the URL tab to paste the actual YouTube link
-        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
-
-        // Create mock results for display (actual search happens externally)
-        setResults([{
-          videoId: `search:${searchQuery}`,
-          title: `Search results for "${searchQuery}"`,
-          channelTitle: 'Click "Open YouTube Search" below',
-          thumbnailUrl: '',
-          duration: '',
-          viewCount: '',
-          publishedTime: '',
-        }]);
-
-        showToast('Click "Open YouTube Search" to see results', 'success');
+      const videos = await searchInvidious(trimmed);
+      if (videos.length === 0) {
+        setError('Search failed. Try opening YouTube search in a new tab instead.');
+        return;
       }
+
+      setResults(videos.map((video) => ({
+        videoId: video.videoId,
+        title: video.title || 'Untitled',
+        channelTitle: video.author || 'Unknown',
+        thumbnailUrl: bestThumbnail(video),
+        duration: formatLength(video.lengthSeconds),
+        viewCount: formatViewCount(video.viewCount),
+        publishedTime: video.publishedText || '',
+      })));
     } catch (err) {
       console.error('Search error:', err);
-
-      // Final fallback: Open YouTube search directly
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
-      window.open(searchUrl, '_blank');
-      showToast('Opening YouTube search in new tab', 'info');
+      setError('Search failed. Check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,13 +162,6 @@ export function YouTubeSearch() {
   };
 
   const handlePlayVideo = (video: VideoResult) => {
-    // Check if it's a search result or actual video
-    if (video.videoId.startsWith('search:')) {
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-      window.open(searchUrl, '_blank');
-      return;
-    }
-
     setPlayingId(video.videoId);
     const youtubeUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
     loadMedia(youtubeUrl, video.title);
@@ -216,8 +223,25 @@ export function YouTubeSearch() {
         </div>
       )}
 
+      {/* Error State */}
+      {!isLoading && error && (
+        <div className="flex flex-col items-center justify-center py-12">
+          <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+          <p className="text-red-400 font-medium">{error}</p>
+          {query.trim() && (
+            <button
+              onClick={handleOpenYouTubeSearch}
+              className="mt-4 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 transition-all font-semibold text-sm flex items-center gap-2"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Open YouTube Search
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Search Results */}
-      {!isLoading && results.length > 0 && (
+      {!isLoading && !error && results.length > 0 && (
         <div className="space-y-3">
           {results.map((video, index) => (
             <div
@@ -234,6 +258,11 @@ export function YouTubeSearch() {
                       (e.target as HTMLImageElement).style.display = 'none';
                     }}
                   />
+                  {video.duration && (
+                    <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-medium">
+                      {video.duration}
+                    </span>
+                  )}
                 </div>
               ) : (
                 <div className="w-48 h-28 flex-shrink-0 rounded-xl bg-dark-700 flex items-center justify-center">
@@ -246,11 +275,13 @@ export function YouTubeSearch() {
                   {video.title}
                 </h3>
                 <p className="text-sm text-slate-400 mb-1">{video.channelTitle}</p>
-                {video.duration && (
+                {(video.viewCount || video.publishedTime) && (
                   <div className="flex items-center gap-3 text-xs text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <Eye className="w-3 h-3" /> {video.viewCount || '0 views'}
-                    </span>
+                    {video.viewCount && (
+                      <span className="flex items-center gap-1">
+                        <Eye className="w-3 h-3" /> {video.viewCount}
+                      </span>
+                    )}
                     {video.publishedTime && (
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" /> {video.publishedTime}
@@ -261,24 +292,14 @@ export function YouTubeSearch() {
               </div>
 
               <div className="flex flex-col justify-center gap-2">
-                {video.videoId.startsWith('search:') ? (
-                  <button
-                    onClick={handleOpenYouTubeSearch}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 transition-all font-semibold text-sm"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open YouTube Search
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handlePlayVideo(video)}
-                    disabled={playingId === video.videoId}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 transition-all font-semibold text-sm"
-                  >
-                    <Play className="w-4 h-4 fill-white" />
-                    Play
-                  </button>
-                )}
+                <button
+                  onClick={() => handlePlayVideo(video)}
+                  disabled={playingId === video.videoId}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 disabled:opacity-50 transition-all font-semibold text-sm"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  Play
+                </button>
                 <a
                   href={`https://youtube.com/watch?v=${video.videoId}`}
                   target="_blank"
@@ -295,7 +316,7 @@ export function YouTubeSearch() {
       )}
 
       {/* Empty State */}
-      {!isLoading && results.length === 0 && (
+      {!isLoading && !error && results.length === 0 && (
         <div className="text-center py-12">
           <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-dark-700 flex items-center justify-center">
             <Search className="w-10 h-10 text-slate-500" />
@@ -324,7 +345,7 @@ export function YouTubeSearch() {
         </div>
       )}
 
-      {/* Supported Formats Help */}
+      {/* Quick Access */}
       <div className="mt-8 p-4 rounded-xl bg-dark-700/30 border border-white/5">
         <h4 className="font-medium text-slate-300 mb-3">Quick access:</h4>
         <div className="flex flex-wrap gap-2">

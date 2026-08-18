@@ -76,10 +76,10 @@ export function useTouchGestures(
 ) {
   const { onSingleTap, onDoubleTapLeft, onDoubleTapRight, onHorizontalSwipe, onVerticalSwipe, onLongPress } = options;
 
-  const touchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const touchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const longPressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const element = elementRef.current;

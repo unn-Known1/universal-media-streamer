@@ -1,4 +1,4 @@
-import { MediaType } from '../types';
+import { MediaType, Settings } from '../types';
 
 export const MEDIA_EXTENSIONS: Record<string, MediaType> = {
   '.mp4': 'mp4',
@@ -16,6 +16,8 @@ export const YOUTUBE_PATTERNS = [
 ];
 
 export const VIMEO_PATTERN = /vimeo\.com\/(?:video\/)?(\d+)/;
+
+export const TWITCH_PATTERN = /twitch\.tv\/([a-zA-Z0-9_]+)/;
 
 export const GOOGLE_DRIVE_PATTERN = /drive\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/;
 
@@ -52,7 +54,7 @@ export const KEYBOARD_SHORTCUTS = {
   '?': 'showShortcuts',
 };
 
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark' as const,
   accentColor: '#6366f1',
   defaultPlaybackSpeed: 1,
@@ -63,9 +65,19 @@ export const DEFAULT_SETTINGS = {
   captionBackground: 'rgba(0, 0, 0, 0.75)',
   reducedMotion: false,
   highContrast: false,
+  layoutDensity: 'default' as const,
+  iptvRememberChannel: false,
+  twitchChannels: [],
 };
 
 export const MAX_HISTORY_ITEMS = 20;
 export const MAX_BOOKMARK_ITEMS = 100;
 
 export const CONTROL_BAR_HIDE_DELAY = 3000;
+
+export const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://yewtu.be',
+  'https://invidious.nerdvpn.de',
+  'https://vid.puffyan.us',
+];

@@ -8,6 +8,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ToastContainer } from './components/Toast';
 import { SettingsProvider, initializeTheme, useSettings } from './contexts/SettingsContext';
 import { PlayerProvider, usePlayer } from './contexts/PlayerContext';
+import { useMediaSession } from './hooks/useMediaSession';
 import { Link, Youtube } from 'lucide-react';
 
 function AppContent() {
@@ -16,7 +17,21 @@ function AppContent() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [inputTab, setInputTab] = useState<'url' | 'youtube'>('url');
   const { settings } = useSettings();
-  const { playerState } = usePlayer();
+  const { playerState, play, pause, seek } = usePlayer();
+
+  useMediaSession(
+    playerState.currentMedia
+      ? 'title' in playerState.currentMedia
+        ? playerState.currentMedia.title
+        : playerState.currentMedia.name
+      : null,
+    playerState.isPlaying,
+    playerState.currentTime,
+    playerState.duration,
+    seek,
+    play,
+    pause
+  );
 
   useEffect(() => {
     const cleanup = initializeTheme(settings.theme);
@@ -27,8 +42,17 @@ function AppContent() {
     document.documentElement.style.setProperty('--accent-color', settings.accentColor);
   }, [settings.accentColor]);
 
+  // Opening the shortcuts reference should also open the settings modal
+  useEffect(() => {
+    if (showShortcuts) {
+      setSettingsOpen(true);
+    }
+  }, [showShortcuts]);
+
+  const isTheaterMode = playerState.isTheaterMode;
+
   return (
-    <div className={`min-h-screen bg-dark-900 ${settings.highContrast ? 'high-contrast' : ''}`}>
+    <div className={`min-h-screen bg-dark-900 ${settings.highContrast ? 'high-contrast' : ''} ${settings.layoutDensity === 'compact' ? 'layout-compact' : settings.layoutDensity === 'comfortable' ? 'layout-comfortable' : ''}`}>
       {/* Header */}
       <Header
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -44,18 +68,22 @@ function AppContent() {
       {/* Main Content */}
       <main className={`pt-4 pb-8 px-4 md:px-8 transition-all duration-300 ${
         sidebarOpen ? 'md:ml-80' : ''
-      }`}>
-        <div className="max-w-6xl mx-auto space-y-8">
+      } ${isTheaterMode ? 'bg-black/60 theater-active' : ''}`}>
+        <div className={`${isTheaterMode ? 'max-w-7xl' : 'max-w-6xl'} mx-auto space-y-8`}>
           {/* Player Section */}
           <section className="space-y-4">
-            <Player onShowShortcuts={() => setShowShortcuts(true)} />
+            <div className={isTheaterMode ? '-mx-4 md:-mx-8' : ''}>
+              <Player onShowShortcuts={() => setShowShortcuts(true)} />
+            </div>
 
             {/* Media Info */}
             {playerState.currentMedia && (
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold truncate">
-                    {playerState.currentMedia.title}
+                    {'title' in playerState.currentMedia
+                      ? playerState.currentMedia.title
+                      : playerState.currentMedia.name}
                   </h2>
                   <p className="text-sm text-slate-400">
                     {playerState.currentMedia.type.toUpperCase()} • {playerState.currentMedia.url}

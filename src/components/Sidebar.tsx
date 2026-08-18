@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   Play,
@@ -21,6 +21,7 @@ import { usePlayer } from '../contexts/PlayerContext';
 import { MediaItem, IPTVPlaylist, IPTVChannel } from '../types';
 import { formatDate } from '../utils/formatTime';
 import { getMediaTypeColor, getMediaTypeLabel } from '../utils/mediaDetector';
+import { parseM3U } from '../utils/iptvParser';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -38,18 +39,52 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     loadMedia, 
     loadIPTVChannel,
     removeFromPlaylist, 
+    removeFromHistory,
     removeBookmark, 
     clearPlaylist, 
     clearHistory, 
     clearBookmarks,
     removeIPTVPlaylist,
     clearIPTVPlaylists,
+    addIPTVPlaylist,
     addBookmark, 
     showToast 
   } = usePlayer();
   const [activeTab, setActiveTab] = useState<TabType>('playlist');
   const [filter, setFilter] = useState('');
   const [contextMenu, setContextMenu] = useState<{ item: MediaItem | IPTVPlaylist; x: number; y: number } | null>(null);
+  const localPlaylistInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLocalPlaylistFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const content = reader.result as string;
+        const channels = parseM3U(content);
+        if (channels.length === 0) {
+          showToast('No channels found in playlist', 'warning');
+          return;
+        }
+        const playlist: IPTVPlaylist = {
+          id: `local-${Date.now()}`,
+          name: file.name.replace(/\.(m3u8?)$/i, ''),
+          url: URL.createObjectURL(file),
+          channels,
+          addedAt: Date.now(),
+        };
+        addIPTVPlaylist(playlist);
+        showToast(`Loaded ${channels.length} channels from ${file.name}`, 'success');
+        setActiveTab('iptv');
+      } catch {
+        showToast('Failed to parse playlist file', 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const tabs = [
     { id: 'playlist' as const, label: 'Playlist', icon: ListVideo, count: playlist.length },
@@ -76,10 +111,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     }
     if (filter) {
       items = items.filter(
-        (item) =>
-          item.title.toLowerCase().includes(filter.toLowerCase()) ||
-          ('url' in item && item.url.toLowerCase().includes(filter.toLowerCase())) ||
-          ('name' in item && item.name.toLowerCase().includes(filter.toLowerCase()))
+        (item) => {
+          const title = 'title' in item ? item.title : item.name;
+          return (
+            title.toLowerCase().includes(filter.toLowerCase()) ||
+            ('url' in item && item.url.toLowerCase().includes(filter.toLowerCase()))
+          );
+        }
       );
     }
     return items;
@@ -107,6 +145,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     switch (activeTab) {
       case 'playlist':
         removeFromPlaylist(item.id);
+        break;
+      case 'history':
+        removeFromHistory(item.id);
         break;
       case 'bookmarks':
         removeBookmark(item.id);
@@ -311,10 +352,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               <div className="p-3 border-t border-white/5">
                 {activeTab === 'iptv' && (
                   <button
-                    onClick={() => {
-                      // Could open file picker for local M3U files
-                      showToast('Paste an M3U/M3U8 URL to add IPTV playlists', 'info');
-                    }}
+                    onClick={() => localPlaylistInputRef.current?.click()}
                     className="w-full h-10 flex items-center justify-center gap-2 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 hover:text-violet-300 transition-colors text-sm mb-2"
                   >
                     <Upload className="w-4 h-4" />
@@ -349,6 +387,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </>
         )}
       </AnimatePresence>
+
+      {/* Hidden file input for local IPTV playlists */}
+      <input
+        ref={localPlaylistInputRef}
+        type="file"
+        accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
+        onChange={handleLocalPlaylistFile}
+        className="hidden"
+      />
 
       {/* Context Menu */}
       <AnimatePresence>

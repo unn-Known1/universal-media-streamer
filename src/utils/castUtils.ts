@@ -14,7 +14,7 @@ export interface CastState {
 class DLNACastService {
   private devices: CastDevice[] = [];
   private isSearching = false;
-  private searchTimeout: NodeJS.Timeout | null = null;
+  private searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async searchForDevices(): Promise<CastDevice[]> {
     if (this.isSearching) {
@@ -213,26 +213,36 @@ class DLNACastService {
   }
 
   private async castToDLNA(device: CastDevice, mediaUrl: string, title?: string): Promise<boolean> {
-    // DLNA/UPnP casting using WebSocket for control
-    // This is a simplified implementation
+    // Simulated devices have no reachable IP - skip the fake HTTP request and
+    // go straight to the cast receiver fallback so the user gets a response
+    // immediately instead of a hang.
+    if (device.id.startsWith('dlna-')) {
+      window.open(
+        `https://www.google.com/cast/load?url=${encodeURIComponent(mediaUrl)}&title=${encodeURIComponent(title || 'Media')}`,
+        '_blank',
+        'width=600,height=400'
+      );
+      return true;
+    }
 
     try {
-      // Create DLNA AVTransport service URL (typically on port 8008 for Chromecast)
       const deviceIp = this.getDeviceIP(device.id);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
-      // Send play command via HTTP (simplified)
-      const response = await fetch(`http://${deviceIp}:8008/媒体的/Control`, {
+      const response = await fetch(`http://${deviceIp}:8008/upnp/control`, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset="utf-8"',
-          'SOAPACTION': '"urn:schemas-upnp-org:service:AVTransport:1#Stop"',
+          'SOAPACTION': '"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"',
         },
-        body: this.createAVTransportSOAP('Stop', deviceIp, mediaUrl, title),
+        body: this.createAVTransportSOAP('SetAVTransportURI', deviceIp, mediaUrl, title),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (response.ok) {
-        // Then send play command
-        await fetch(`http://${deviceIp}:8008/媒体的/Control`, {
+        const playResponse = await fetch(`http://${deviceIp}:8008/upnp/control`, {
           method: 'POST',
           headers: {
             'Content-Type': 'text/xml; charset="utf-8"',
@@ -240,7 +250,7 @@ class DLNACastService {
           },
           body: this.createAVTransportSOAP('Play', deviceIp, mediaUrl, title),
         });
-        return true;
+        return playResponse.ok;
       }
     } catch (e) {
       console.warn('DLNA cast error:', e);

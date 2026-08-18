@@ -12,20 +12,19 @@ import {
   Settings,
   SkipBack,
   SkipForward,
+  StepBack,
+  StepForward,
   Repeat,
   Repeat1,
   Camera,
   Cast,
-  ChevronDown,
   Gauge,
   Clapperboard,
-  Languages,
-  Moon,
-  Sun,
   Tv,
   List,
   ChevronLeft,
   ChevronRight,
+  RectangleHorizontal,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayer } from '../contexts/PlayerContext';
@@ -37,9 +36,10 @@ import { IPTVChannel } from '../types';
 interface ControlBarProps {
   videoElement: HTMLVideoElement | null;
   onShowShortcuts: () => void;
+  isEmbed?: boolean;
 }
 
-export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
+export function ControlBar({ videoElement, onShowShortcuts, isEmbed = false }: ControlBarProps) {
   const {
     playerState,
     togglePlay,
@@ -48,7 +48,10 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
     setVolume,
     toggleMute,
     setPlaybackRate,
+    setQuality,
+    setSubtitle,
     toggleFullscreen,
+    toggleTheaterMode,
     togglePiP,
     toggleLoop,
     setABRepeat,
@@ -56,6 +59,9 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
     showToast,
     playNextChannel,
     playPreviousChannel,
+    playNext,
+    playPrevious,
+    playlist,
     currentPlaylist,
   } = usePlayer();
 
@@ -64,48 +70,44 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [isHoveringProgress, setIsHoveringProgress] = useState(false);
   const [hoverTime, setHoverTime] = useState(0);
   const [hoverPosition, setHoverPosition] = useState(0);
-  const [isDraggingProgress, setIsDraggingProgress] = useState(false);
 
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
 
-  const { currentTime, duration, volume, isMuted, isFullscreen, isLooping, abRepeat, buffered, availableQualities, quality } = playerState;
+  const { currentTime, duration, volume, isMuted, isFullscreen, isLooping, abRepeat, buffered, availableQualities, quality, subtitles, activeSubtitle } = playerState;
 
   // IPTV specific
   const isIPTV = playerState.isIPTV;
+  const isLive = isIPTV && duration === 0;
   const currentIPTVChannel = isIPTV ? (playerState.currentMedia as IPTVChannel) : null;
-  const canPlayPrevious = isIPTV && currentPlaylist && playerState.currentChannelIndex > 0;
-  const canPlayNext = isIPTV && currentPlaylist && playerState.currentChannelIndex < currentPlaylist.channels.length - 1;
+
+  const hasPlaylistNavigation = playlist.length > 0;
 
   // Handle volume changes
   const handleVolumeChange = useCallback((e: React.MouseEvent | MouseEvent) => {
-    if (progressRef.current || true) {
-      const rect = volumeRef.current?.getBoundingClientRect();
-      if (rect) {
-        const x = e.clientX - rect.left;
-        const newVolume = Math.max(0, Math.min(x / rect.width, VOLUME_BOOST_MAX));
-        setVolume(newVolume);
-      }
-    }
+    const rect = volumeRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const newVolume = Math.max(0, Math.min(x / rect.width, VOLUME_BOOST_MAX));
+    setVolume(newVolume);
   }, [setVolume]);
 
   // Progress bar interactions
   const handleProgressClick = useCallback((e: React.MouseEvent) => {
     // Disable seeking for live IPTV streams
-    if (isIPTV && duration === 0) return;
-    
+    if (isLive) return;
+
     const rect = progressRef.current?.getBoundingClientRect();
     if (rect) {
       const x = e.clientX - rect.left;
       const percent = x / rect.width;
       seek(percent * duration);
     }
-  }, [duration, seek, isIPTV]);
+  }, [duration, seek, isLive]);
 
   const handleProgressHover = useCallback((e: React.MouseEvent) => {
     const rect = progressRef.current?.getBoundingClientRect();
@@ -137,11 +139,14 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
 
   // Screenshot
   const handleScreenshot = () => {
-    if (!videoElement) return;
+    if (!videoElement) {
+      showToast('Screenshot not available for embedded players', 'info');
+      return;
+    }
 
     const canvas = document.createElement('canvas');
-    canvas.width = videoElement.videoWidth;
-    canvas.height = videoElement.videoHeight;
+    canvas.width = videoElement.videoWidth || 1280;
+    canvas.height = videoElement.videoHeight || 720;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.drawImage(videoElement, 0, 0);
@@ -160,11 +165,29 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
+  const handleABRepeat = () => {
+    if (isLive) {
+      showToast('A-B repeat is not available for live streams', 'info');
+      return;
+    }
+    if (abRepeat.start === null) {
+      setABRepeat(currentTime, null);
+      showToast('A point set', 'info');
+    } else if (abRepeat.end === null) {
+      if (currentTime <= abRepeat.start) {
+        showToast('B point must be after A point', 'warning');
+        return;
+      }
+      setABRepeat(abRepeat.start, currentTime);
+      showToast('B point set', 'info');
+    } else {
+      clearABRepeat();
+      showToast('A-B repeat cleared', 'info');
+    }
+  };
+
   return (
-    <div
-      ref={controlsRef}
-      className="control-bar absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300"
-    >
+    <div className="control-bar absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300">
       {/* Hover Time Tooltip */}
       <AnimatePresence>
         {isHoveringProgress && duration > 0 && (
@@ -181,7 +204,7 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
       </AnimatePresence>
 
       {/* Progress Bar - Hide for live IPTV streams */}
-      {!(isIPTV && duration === 0) && (
+      {!isLive && (
         <div
           ref={progressRef}
           className="group relative h-1.5 bg-white/20 rounded-full cursor-pointer mb-4 overflow-hidden"
@@ -197,12 +220,12 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           />
 
           {/* A-B Repeat Markers */}
-          {abRepeat.start !== null && (
+          {abRepeat.start !== null && abRepeat.end !== null && (
             <div
               className="absolute top-0 bottom-0 bg-primary-500/50"
               style={{
                 left: `${(abRepeat.start / duration) * 100}%`,
-                right: `${100 - (abRepeat.end! / duration) * 100}%`,
+                right: `${100 - (abRepeat.end / duration) * 100}%`,
               }}
             />
           )}
@@ -234,7 +257,7 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
       )}
 
       {/* Live Indicator for IPTV */}
-      {isIPTV && duration === 0 && (
+      {isLive && (
         <div className="mb-4 flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           <span className="text-sm text-slate-400">LIVE</span>
@@ -262,49 +285,67 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           </button>
 
           {/* IPTV: Previous Channel */}
-          {isIPTV && (
+          {isIPTV ? (
             <button
               onClick={playPreviousChannel}
-              disabled={!canPlayPrevious}
-              className="p-2 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded-xl hover:bg-white/10 transition-colors"
               aria-label="Previous channel"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
+          ) : (
+            hasPlaylistNavigation && !isEmbed && (
+              <button
+                onClick={playPrevious}
+                className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+                aria-label="Previous in playlist"
+              >
+                <StepBack className="w-5 h-5" />
+              </button>
+            )
           )}
 
           {/* Skip Back (disabled for live IPTV) */}
           <button
             onClick={() => seekRelative(-10)}
-            disabled={isIPTV && duration === 0}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors group disabled:opacity-30 disabled:cursor-not-allowed"
+            disabled={isLive}
+            className="p-2 rounded-xl hover:bg-white/10 transition-colors group relative disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Skip back 10 seconds"
           >
-            <SkipBack className={`w-5 h-5 ${!isIPTV ? 'group-hover:scale-110 transition-transform' : ''}`} />
-            {!isIPTV && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
+            <SkipBack className={isLive ? '' : 'group-hover:scale-110 transition-transform'} />
+            {!isLive && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
           </button>
 
           {/* Skip Forward (disabled for live IPTV) */}
           <button
             onClick={() => seekRelative(10)}
-            disabled={isIPTV && duration === 0}
+            disabled={isLive}
             className="p-2 rounded-xl hover:bg-white/10 transition-colors group relative disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Skip forward 10 seconds"
           >
-            <SkipForward className={`w-5 h-5 ${!isIPTV ? 'group-hover:scale-110 transition-transform' : ''}`} />
-            {!isIPTV && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
+            <SkipForward className={isLive ? '' : 'group-hover:scale-110 transition-transform'} />
+            {!isLive && <span className="absolute -top-1 -right-1 text-[8px] font-bold">10</span>}
           </button>
 
           {/* IPTV: Next Channel */}
-          {isIPTV && (
+          {isIPTV ? (
             <button
               onClick={playNextChannel}
-              disabled={!canPlayNext}
-              className="p-2 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded-xl hover:bg-white/10 transition-colors"
               aria-label="Next channel"
             >
               <ChevronRight className="w-5 h-5" />
             </button>
+          ) : (
+            hasPlaylistNavigation && !isEmbed && (
+              <button
+                onClick={playNext}
+                className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+                aria-label="Next in playlist"
+              >
+                <StepForward className="w-5 h-5" />
+              </button>
+            )
           )}
 
           {/* Volume */}
@@ -318,6 +359,7 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
             </button>
 
             <div
+              ref={volumeRef}
               className="relative w-24 h-1.5 bg-white/20 rounded-full cursor-pointer"
               onClick={handleVolumeChange}
               onMouseEnter={() => setShowVolumeSlider(true)}
@@ -339,31 +381,20 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           </div>
 
           {/* Time - hide for live IPTV */}
-          {!isIPTV || duration > 0 ? (
+          {!isLive && (
             <div className="ml-2 text-sm font-mono tabular-nums">
               <span>{formatTime(currentTime)}</span>
               <span className="text-slate-500 mx-1">/</span>
               <span className="text-slate-400">{formatTime(duration)}</span>
             </div>
-          ) : null}
+          )}
         </div>
 
         {/* Right Controls */}
         <div className="flex items-center gap-1">
           {/* A-B Repeat */}
           <button
-            onClick={() => {
-              if (abRepeat.start === null) {
-                setABRepeat(currentTime, null);
-                showToast('A point set', 'info');
-              } else if (abRepeat.end === null) {
-                setABRepeat(abRepeat.start, currentTime);
-                showToast('B point set', 'info');
-              } else {
-                clearABRepeat();
-                showToast('A-B repeat cleared', 'info');
-              }
-            }}
+            onClick={handleABRepeat}
             className={`p-2 rounded-xl transition-colors ${
               abRepeat.start !== null ? 'bg-primary-500/20 text-primary-400' : 'hover:bg-white/10'
             }`}
@@ -387,8 +418,9 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           <div className="relative">
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-              disabled={isIPTV && duration === 0}
+              disabled={isLive}
               className="px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-sm font-medium flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Playback speed"
             >
               <Gauge className="w-4 h-4" />
               {playerState.playbackRate}x
@@ -427,6 +459,7 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
               <button
                 onClick={() => setShowQualityMenu(!showQualityMenu)}
                 className="px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-sm font-medium flex items-center gap-1"
+                aria-label="Quality"
               >
                 <Clapperboard className="w-4 h-4" />
                 {quality === 'auto' ? 'Auto' : quality}
@@ -438,11 +471,11 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute bottom-full right-0 mb-2 p-2 bg-dark-700/95 backdrop-blur rounded-xl border border-white/10 shadow-2xl min-w-[100px]"
+                    className="absolute bottom-full right-0 mb-2 p-2 bg-dark-700/95 backdrop-blur rounded-xl border border-white/10 shadow-2xl min-w-[110px]"
                   >
                     <button
                       onClick={() => {
-                        setPlaybackRate(1); // Trigger auto quality
+                        setQuality('auto');
                         setShowQualityMenu(false);
                       }}
                       className={`w-full px-3 py-2 rounded-lg text-sm text-left hover:bg-white/10 transition-colors ${
@@ -451,11 +484,11 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
                     >
                       Auto
                     </button>
-                    {availableQualities.map((q) => (
+                    {availableQualities.filter((q) => q !== 'auto').map((q) => (
                       <button
                         key={q}
                         onClick={() => {
-                          setPlaybackRate(1); // Trigger quality change
+                          setQuality(q);
                           setShowQualityMenu(false);
                         }}
                         className={`w-full px-3 py-2 rounded-lg text-sm text-left hover:bg-white/10 transition-colors ${
@@ -472,13 +505,61 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           )}
 
           {/* Subtitles */}
-          <button
-            onClick={() => showToast('Subtitles coming soon', 'info')}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            aria-label="Toggle subtitles"
-          >
-            <Subtitles className="w-5 h-5" />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (subtitles.length === 0) {
+                  showToast('No subtitles available for this stream', 'info');
+                  return;
+                }
+                setShowSubtitleMenu(!showSubtitleMenu);
+              }}
+              className={`p-2 rounded-xl transition-colors ${
+                activeSubtitle ? 'bg-primary-500/20 text-primary-400' : 'hover:bg-white/10'
+              }`}
+              aria-label="Toggle subtitles"
+            >
+              <Subtitles className="w-5 h-5" />
+            </button>
+
+            <AnimatePresence>
+              {showSubtitleMenu && subtitles.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="absolute bottom-full right-0 mb-2 p-2 bg-dark-700/95 backdrop-blur rounded-xl border border-white/10 shadow-2xl min-w-[160px]"
+                >
+                  <button
+                    onClick={() => {
+                      setSubtitle(null);
+                      setShowSubtitleMenu(false);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg text-sm text-left hover:bg-white/10 transition-colors ${
+                      activeSubtitle === null ? 'text-primary-400 bg-primary-500/10' : ''
+                    }`}
+                  >
+                    Off
+                  </button>
+                  {subtitles.map((track) => (
+                    <button
+                      key={track.id}
+                      onClick={() => {
+                        setSubtitle(track.id);
+                        setShowSubtitleMenu(false);
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg text-sm text-left hover:bg-white/10 transition-colors ${
+                        activeSubtitle === track.id ? 'text-primary-400 bg-primary-500/10' : ''
+                      }`}
+                    >
+                      {track.label}
+                      {track.language && <span className="text-xs text-slate-500 ml-2">({track.language})</span>}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Screenshot */}
           <button
@@ -491,29 +572,33 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
 
           {/* Cast */}
           <button
-            onClick={() => showToast('Casting available on supported devices', 'info')}
+            onClick={() => showToast('Open the scan dialog to find cast devices', 'info')}
             className="p-2 rounded-xl hover:bg-white/10 transition-colors"
             aria-label="Cast to device"
           >
             <Cast className="w-5 h-5" />
           </button>
 
-          {/* PiP */}
-          <button
-            onClick={togglePiP}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            aria-label="Picture in Picture"
-          >
-            <PictureInPicture2 className="w-5 h-5" />
-          </button>
+          {/* PiP - not available for embeds */}
+          {!isEmbed && (
+            <button
+              onClick={togglePiP}
+              className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+              aria-label="Picture in Picture"
+            >
+              <PictureInPicture2 className="w-5 h-5" />
+            </button>
+          )}
 
           {/* Theater */}
           <button
-            onClick={() => {}}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+            onClick={toggleTheaterMode}
+            className={`p-2 rounded-xl hover:bg-white/10 transition-colors ${
+              playerState.isTheaterMode ? 'bg-primary-500/20 text-primary-400' : ''
+            }`}
             aria-label="Theater mode"
           >
-            <Minimize className="w-5 h-5" />
+            <RectangleHorizontal className="w-5 h-5" />
           </button>
 
           {/* Fullscreen */}
@@ -533,7 +618,8 @@ export function ControlBar({ videoElement, onShowShortcuts }: ControlBarProps) {
           <button
             onClick={onShowShortcuts}
             className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            aria-label="Settings"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts"
           >
             <Settings className="w-5 h-5" />
           </button>
